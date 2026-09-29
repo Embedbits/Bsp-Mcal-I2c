@@ -14,7 +14,7 @@ It supports initialization, SCL frequency configuration with automatic TIMINGR c
 - Transfers: write, read, write + repeated START + read (register access), address only (device presence check)
 - Transfers longer than 255 bytes (NBYTES reload)
 - Data transfer modes: DMA (GPDMA), ISR, POLL (`I2c_Task()`) - same request, same callbacks
-- SCL / SDA pins configured as open-drain alternate function
+- SCL / SDA pin lists per device family (open-drain alternate function)
 
 Not supported: slave mode, SMBus, bus recovery (slave holding SDA low), transfer timeout.
 
@@ -65,8 +65,8 @@ i2c_Config_t i2cConfig;
 i2cConfig.PeriphId   = I2C_PERIPH_1;
 i2cConfig.BusFreq    = 400000u;
 i2cConfig.DataConfig = &i2cData;
-i2cConfig.SclPin     = (i2c_PinConfig_t)I2C_PIN_CONFIG( GPIO_PORT_B, GPIO_PIN_ID_6, GPIO_ALT_FUNC_4 ); /* check datasheet */
-i2cConfig.SdaPin     = (i2c_PinConfig_t)I2C_PIN_CONFIG( GPIO_PORT_B, GPIO_PIN_ID_7, GPIO_ALT_FUNC_4 ); /* check datasheet */
+i2cConfig.SclPin     = I2C_SCL_PIN_I2C1_PB6;
+i2cConfig.SdaPin     = I2C_SDA_PIN_I2C1_PB7;
 
 (void)I2c_Init( &i2cConfig );
 
@@ -84,7 +84,7 @@ const i2c_XferRequest_t request =
 (void)I2c_Set_XferStart( I2C_PERIPH_1, &request );
 ```
 
-Pin to peripheral mapping is not validated by the module - use the alternate function from the device datasheet.
+SCL / SDA pins are selected from `i2c_SclPin_t` / `i2c_SdaPin_t` - only pins available on the selected device (STM32H503, H523/H533, H562, H563/H573, H5E4/H5F4, H5E5/H5F5) are defined. The pin must belong to `PeriphId`, otherwise `I2c_Init()` returns error. Pin tables were generated from `EmBi_Platform/Docs/AF`.
 
 ---
 
