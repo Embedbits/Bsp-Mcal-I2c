@@ -22,5 +22,9 @@ UnitTesting_Add_Test(
                     ${MCAL_DIR}/Nvic
                     ${MCAL_DIR}/Gpio
                     ${MCAL_DIR}/Gpdma
-    LINK_LIBS       Ral_Lib
+    LINK_LIBS       ut_RegMem                           # Registers in host memory
+                    ut_CmsisHost                        # CMSIS core intrinsics on host
+    FORCE_INCLUDES  ${UNIT_TESTING_CMSIS_HOST_HEADER}   # Replaces cmsis_gcc.h
+    HOST_LIBS       Ral_Lib                             # ST LL compiled for host
+    COVERAGE_EXCLUDE ".*/Ral/.*"
 )

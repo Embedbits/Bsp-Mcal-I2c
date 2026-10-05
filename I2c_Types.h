@@ -1,4 +1,9 @@
 /**
+ * \defgroup I2c I2c
+ * \brief I2c module
+ */
+
+/**
  * \author Mr.Nobody
  * \file I2c_Types.h
  * \ingroup I2c

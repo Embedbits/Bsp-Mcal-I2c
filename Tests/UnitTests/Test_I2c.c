@@ -356,19 +356,19 @@ void Ut_I2c_Init_KernelClockZero_ReturnsErrorPeripheralNotEnabled( void )
 /**
  * \brief   I2c_Init() configures SCL / SDA pins.
  *
- * \details Initializes I2C1 with SCL PB8, SDA PB9 and pull-up. GPIO initialization
- *          is captured by stub.
+ * \details Initializes I2C1 with SCL PB6, SDA PB7 (available on every STM32H5) and
+ *          pull-up. GPIO initialization is captured by stub.
  *
  * \par Expected results
  * - I2C_REQUEST_OK.
- * - Last configured pin is PB9: alternate mode, open-drain, pull-up, AF4.
+ * - Last configured pin is PB7: alternate mode, open-drain, pull-up, AF4.
  */
 void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
 {
     i2c_Config_t config = Ut_I2c_Get_Config();
 
-    config.SclPin  = I2C_SCL_PIN_I2C1_PB8;
-    config.SdaPin  = I2C_SDA_PIN_I2C1_PB9;
+    config.SclPin  = I2C_SCL_PIN_I2C1_PB6;
+    config.SdaPin  = I2C_SDA_PIN_I2C1_PB7;
     config.PinPull = I2C_PIN_PULL_UP;
 
     Rcc_Set_PeriphActive_IgnoreAndReturn( RCC_REQUEST_OK );
@@ -380,9 +380,9 @@ void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 
-    /* Last configured pin: SDA PB9 */
+    /* Last configured pin: SDA PB7 */
     TEST_ASSERT_EQUAL( GPIO_PORT_B,               utI2c_GpioConfig.PortId );
-    TEST_ASSERT_EQUAL( GPIO_PIN_ID_9,             utI2c_GpioConfig.PinId );
+    TEST_ASSERT_EQUAL( GPIO_PIN_ID_7,             utI2c_GpioConfig.PinId );
     TEST_ASSERT_EQUAL( GPIO_PIN_MODE_ALTERNATE,   utI2c_GpioConfig.PinMode );
     TEST_ASSERT_EQUAL( GPIO_PIN_OUTPUT_OPENDRAIN, utI2c_GpioConfig.PinOutType );
     TEST_ASSERT_EQUAL( GPIO_PIN_PULL_UP,          utI2c_GpioConfig.PinPull );

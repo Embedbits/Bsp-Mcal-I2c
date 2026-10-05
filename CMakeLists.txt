@@ -1,4 +1,4 @@
-# Template version: 0.0.0
+# Template version: 0.0.1
 # Sets the version of CMakeLists.txt file.
 # Never, under any circumstances, change this line. It is used by
 # the module generation script to identify the template version.
@@ -85,10 +85,9 @@ target_include_directories( I2c_Lib
     PUBLIC
         $<BUILD_INTERFACE:${PUBLIC_HEADERS_DIR}>
         $<INSTALL_INTERFACE:include>
-        I2c_PublicIncludeDirs
+        ${I2c_PublicIncludeDirs}
     PRIVATE
-        ${I2c_IncludeDirs}
-        I2c_PrivateIncludeDirs
+        ${I2c_PrivateIncludeDirs}
 )
 
 
