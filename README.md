@@ -1,22 +1,31 @@
 # I2C Peripheral Driver
 
-This module provides an abstraction layer for configuring and managing **I2C peripherals** on STM32H5 MCUs in **master mode**.  
-It supports initialization, SCL frequency configuration with automatic TIMINGR calculation, noise filters, and data transfers in DMA, interrupt or polling mode.
+This module provides an abstraction layer for configuring and managing **I2C peripherals** on STM32F4 MCUs (I2C v1 peripheral) in **master mode**.  
+It supports initialization, SCL frequency configuration with automatic CCR / TRISE calculation, noise filters, and data transfers in DMA, interrupt or polling mode.
+The public interface is shared with the STM32H5 family.
 
 ---
 
 ## Features
 
-- Kernel clock source selection (PCLK / PLLR / HSI / CSI)
-- SCL frequency in Hz - TIMINGR is calculated from I2C specification timings (Standard-mode, Fast-mode, Fast-mode Plus incl. FMP drive)
-- Analog and digital noise filter
+- I2C clock is APB1 clock (PCLK1, 2 - 50 MHz) - `I2C_CLK_SRC_PCLK` only
+- SCL frequency in Hz (up to 400 kHz) - CR2 FREQ, CCR (duty cycle 2 or 16/9) and TRISE are calculated from PCLK1 and I2C specification timings
+- Analog and digital noise filter on devices with FLTR register (not STM32F405 / 407 / 415 / 417 - only filters off accepted there)
 - 7-bit and 10-bit addressing
 - Transfers: write, read, write + repeated START + read (register access), address only (device presence check)
-- Transfers longer than 255 bytes (NBYTES reload)
-- Data transfer modes: DMA (GPDMA), ISR, POLL (`I2c_Task()`) - same request, same callbacks
-- SCL / SDA pins configured as open-drain alternate function
+- Transfers up to 65535 bytes per phase (I2C v1 has no byte counter - master sequencing in software, reception by BTF procedure of RM)
+- Data transfer modes: DMA (DMA1 streams), ISR, POLL (`I2c_Task()`) - same request, same callbacks
+- SCL / SDA pin lists per device family (open-drain alternate function)
 
-Not supported: slave mode, SMBus, bus recovery (slave holding SDA low), transfer timeout.
+Not supported: slave mode, SMBus, FMPI2C1 (STM32F410 / 412 / 413 / 423 / 446), Fast-mode Plus, bus recovery (slave holding SDA low), transfer timeout.
+
+### STM32F4 specifics
+
+- Transfer end: the STOP condition is requested at the end of the transfer, the next `I2c_Set_XferStart()` waits until it is sent.
+- Transfer abort (`I2c_Set_XferStop()`, DMA / sequencing errors) uses software reset (SWRST) with restored configuration - clearing PE does not stop a running communication on I2C v1.
+- DMA mode: `TxDmaChannelId` / `RxDmaChannelId` identify DMA1 **streams** connected to the I2C request of the direction (e.g. STM32F407 I2C1: RX stream 0 / 5, TX stream 6 / 7), channel selection is derived by the module. Single byte reception is done by I2C interrupt (DMA can not NACK a single byte).
+- Device errata handling: spurious bus error (BERR) in master mode is cleared and ignored. Repeated START setup time may be violated in Standard-mode above 88 kHz - use up to 88 kHz or Fast-mode with strict slaves.
+- STM32F4 LL `LL_I2C_IsEnabledAnalogFilter()` returns inverted state - the module reads FLTR ANOFF directly.
 
 ---
 
@@ -65,8 +74,8 @@ i2c_Config_t i2cConfig;
 i2cConfig.PeriphId   = I2C_PERIPH_1;
 i2cConfig.BusFreq    = 400000u;
 i2cConfig.DataConfig = &i2cData;
-i2cConfig.SclPin     = (i2c_PinConfig_t)I2C_PIN_CONFIG( GPIO_PORT_B, GPIO_PIN_ID_6, GPIO_ALT_FUNC_4 ); /* check datasheet */
-i2cConfig.SdaPin     = (i2c_PinConfig_t)I2C_PIN_CONFIG( GPIO_PORT_B, GPIO_PIN_ID_7, GPIO_ALT_FUNC_4 ); /* check datasheet */
+i2cConfig.SclPin     = I2C_SCL_PIN_I2C1_PB6;
+i2cConfig.SdaPin     = I2C_SDA_PIN_I2C1_PB7;
 
 (void)I2c_Init( &i2cConfig );
 
@@ -84,7 +93,7 @@ const i2c_XferRequest_t request =
 (void)I2c_Set_XferStart( I2C_PERIPH_1, &request );
 ```
 
-Pin to peripheral mapping is not validated by the module - use the alternate function from the device datasheet.
+SCL / SDA pins are selected from `i2c_SclPin_t` / `i2c_SdaPin_t` - only pins available on the selected device family (F405/F415, F407/F417/F42x/F43x/F469/F479, F401, F410/F411/F412/F413/F423, F446) are defined. The pin must belong to `PeriphId`, otherwise `I2c_Init()` returns error. Pin and DMA request tables were generated from embassy stm32-data of all STM32F4 devices (pins missing in small packages are not distinguished).
 
 ---
 
