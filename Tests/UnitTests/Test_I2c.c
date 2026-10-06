@@ -24,6 +24,7 @@
 /* ============================= INCLUDES =================================== */
 #include "unity.h"                          /* Unity testing framework        */
 #include "RegMem.h"                         /* Register memory emulation      */
+#include "CmsisHost.h"                      /* Core intrinsics emulation      */
 #include "I2c_Port.h"                       /* Module under test              */
 #include "MockRcc_Port.h"                   /* RCC module mock                */
 #include "MockNvic_Port.h"                  /* NVIC module mock               */
@@ -2083,6 +2084,50 @@ void Ut_I2c_Dma_I2c2I2c3Callbacks_OwnPeripheralReported( void )
 #else
     TEST_IGNORE_MESSAGE( "MCU without I2C2 / I2C3" );
 #endif /* I2C2 AND I2C3 */
+}
+
+
+/**
+ * \brief   Interrupt service routine of every I2C ends with DSB.
+ *
+ * \details Every I2C of the MCU initialized in ISR mode, captured interrupt called once without
+ *          flags and transfer, peripheral deinitialized.
+ *
+ * \note    Device errata bug AB#670 (ES0182 2.1.3 "Store immediate overlapping exception return
+ *          operation might vector to incorrect interrupt", Arm ID 838869): a buffered store with
+ *          immediate offset still pending at the exception return may vector to an incorrect
+ *          interrupt. Workaround - DSB before the exception return of every handler.
+ *
+ * \par Expected results
+ * - Every ISR executes exactly one DSB.
+ */
+void Ut_I2c_Isr_AllPeriphs_EndWithDsb( void )
+{
+    i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+
+    for( uint32_t periphId = 0u; I2C_PERIPH_CNT > periphId; periphId++ )
+    {
+        i2c_Config_t config = Ut_I2c_Get_Config();
+
+        config.PeriphId   = (i2c_PeriphId_t)periphId;
+        config.DataConfig = &dataConfig;
+
+        Ut_I2c_Reset_Mocks();
+        Ut_I2c_Ignore_PeriphMocks();
+        Nvic_Set_PeriphIrq_Handler_StubWithCallback( Ut_I2c_NvicAnyHandlerStub );
+        Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccAnyClkStub );
+        utI2c_AnyIsr = NULL;
+
+        TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
+        TEST_ASSERT_NOT_NULL( utI2c_AnyIsr );
+
+        const uint32_t dsbCnt = CmsisHost_Get_InstrCnt( CMSISHOST_INSTR_DSB );
+
+        utI2c_AnyIsr();
+
+        TEST_ASSERT_EQUAL_UINT32( dsbCnt + 1u, CmsisHost_Get_InstrCnt( CMSISHOST_INSTR_DSB ) );
+        TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Deinit( (i2c_PeriphId_t)periphId ) );
+    }
 }
 
 /* ========================== LOCAL FUNCTIONS =============================== */

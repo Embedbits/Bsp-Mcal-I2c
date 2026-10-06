@@ -3525,6 +3525,7 @@ static i2c_RequestState_t I2c_Soft_Check_TxDone( i2c_PeriphId_t periphId )
 static void I2c_I2c1_IsrHandler( void )
 {
     (void)I2c_Isr_Handler( I2C_PERIPH_1 );
+    __DSB();    /* Cortex-M4 erratum 838869: stores completed before the exception return */
 }
 #endif /* I2C1 */
 
@@ -3535,6 +3536,7 @@ static void I2c_I2c1_IsrHandler( void )
 static void I2c_I2c2_IsrHandler( void )
 {
     (void)I2c_Isr_Handler( I2C_PERIPH_2 );
+    __DSB();    /* Cortex-M4 erratum 838869: stores completed before the exception return */
 }
 #endif /* I2C2 */
 
@@ -3545,6 +3547,7 @@ static void I2c_I2c2_IsrHandler( void )
 static void I2c_I2c3_IsrHandler( void )
 {
     (void)I2c_Isr_Handler( I2C_PERIPH_3 );
+    __DSB();    /* Cortex-M4 erratum 838869: stores completed before the exception return */
 }
 #endif /* I2C3 */
 
