@@ -21,9 +21,10 @@
  * the register, following written bytes are stored and read bytes are returned
  * from the selected register with auto increment.
  *
- * Board NUCLEO_F411RE (STM32F411xE): I2C1 master PB8 (SCL) / PB9 (SDA), I2C2 slave PB10 (SCL) /
+ * MCU STM32F411xE (board NUCLEO-F411RE): I2C1 master PB8 (SCL) / PB9 (SDA), I2C2 slave PB10 (SCL) /
  * PB3 (SDA), wiring PB8 - PB10 and PB9 - PB3. DMA1 stream 6 (TX) / stream 0 (RX).
- * Board STM32F4DISCOVERY (STM32F407): I2C1 master PB8 / PB9, I2C2 slave PB10 / PB11,
+ * MCU STM32F405xG / F407xG / F415xG / F417xG (board STM32F4DISCOVERY): I2C1 master PB8 / PB9,
+ * I2C2 slave PB10 / PB11,
  * wiring PB8 - PB10 and PB9 - PB11.
  */
 
@@ -60,7 +61,8 @@ static void It_I2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
 /* ========================= SYMBOLIC CONSTANTS ============================= */
 
 /*----------------------------- Board configuration --------------------------*/
-#if defined(IT_BOARD_NUCLEO_F411RE)
+/* Boards are named by their MCU (IT_BOARD_<MCU>, name of the board from the detection) */
+#if defined(IT_BOARD_STM32F411xE)
 
     /** I2C1 master on PB8 (SCL) / PB9 (SDA) */
     #define IT_I2C_SCL_PIN                  ( I2C_SCL_PIN_I2C1_PB8 )
@@ -79,7 +81,10 @@ static void It_I2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
     #define IT_I2C_DMA_TX_STREAM            ( I2C_DMA_CHANNEL_6 )
     #define IT_I2C_DMA_RX_STREAM            ( I2C_DMA_CHANNEL_0 )
 
-#elif defined(IT_BOARD_STM32F4DISCOVERY)
+#elif defined(IT_BOARD_STM32F405xG) || \
+      defined(IT_BOARD_STM32F407xG) || \
+      defined(IT_BOARD_STM32F415xG) || \
+      defined(IT_BOARD_STM32F417xG)
 
     /** I2C1 master on PB8 (SCL) / PB9 (SDA) */
     #define IT_I2C_SCL_PIN                  ( I2C_SCL_PIN_I2C1_PB8 )
