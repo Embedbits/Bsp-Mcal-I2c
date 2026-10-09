@@ -36,13 +36,19 @@ static void It_I2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
 /* ========================= SYMBOLIC CONSTANTS ============================= */
 
 /*----------------------------- Board configuration --------------------------*/
-#if defined(IT_BOARD_NUCLEO_H503RB)
+/* Boards are named by their MCU (IT_BOARD_<MCU>, name of the board from the detection) */
+#if defined(IT_BOARD_STM32H503xB)
 
     /** I2C1 on PB6 (SCL) / PB7 (SDA) - not connected on the board */
     #define IT_I2C_SCL_PIN                  ( I2C_SCL_PIN_I2C1_PB6 )
     #define IT_I2C_SDA_PIN                  ( I2C_SDA_PIN_I2C1_PB7 )
 
-#elif defined(IT_BOARD_NUCLEO_H533RE) || defined(IT_BOARD_NUCLEO_H563ZI) || defined(IT_BOARD_NUCLEO_H5E5ZJ)
+#elif defined(IT_BOARD_STM32H523xE) || \
+      defined(IT_BOARD_STM32H533xE) || \
+      defined(IT_BOARD_STM32H562xI) || \
+      defined(IT_BOARD_STM32H563xI) || \
+      defined(IT_BOARD_STM32H573xI) || \
+      defined(IT_BOARD_STM32H5E5xJ)
 
     /** I2C1 on PB8 (SCL) / PB9 (SDA) - Arduino D15 / D14, not connected without shield */
     #define IT_I2C_SCL_PIN                  ( I2C_SCL_PIN_I2C1_PB8 )

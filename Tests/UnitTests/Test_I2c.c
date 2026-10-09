@@ -31,7 +31,22 @@
 #include "MockGpio_Port.h"                  /* GPIO module mock               */
 #include "MockGpdma_Port.h"                 /* GPDMA module mock              */
 #include "Stm32_i2c.h"                      /* I2C registers definition       */
+#include <string.h>                         /* memset                         */
 /* ============================= TYPEDEFS =================================== */
+
+/** \brief Record of the calls of one GPDMA channel (Gpdma_* stubs) */
+typedef struct
+{
+    uint32_t            ActiveCnt;      /**< Gpdma_Set_ChannelActive() calls          */
+    uint32_t            InactiveCnt;    /**< Gpdma_Set_ChannelInactive() calls        */
+    uint32_t            IrqOnCnt;       /**< Gpdma_Set_InterruptActive() calls        */
+    uint32_t            IrqOffCnt;      /**< Gpdma_Set_InterruptInactive() calls      */
+    uint32_t            PrioCnt;        /**< Gpdma_Set_Priority() calls               */
+    gpdma_Priority_t    Prio;           /**< Last priority                            */
+    gpdma_BlockSize_t   BlockSize;      /**< Last block size                          */
+    gpdma_SrcAddr_t     SrcAddr;        /**< Last source address                      */
+    gpdma_DstAddr_t     DstAddr;        /**< Last destination address                 */
+}   utI2c_DmaChannel_t;
 
 /* ======================= FORWARD DECLARATIONS ============================= */
 
@@ -47,6 +62,20 @@ static i2c_DataConfig_t     Ut_I2c_Get_DataConfig       ( i2c_XferMode_t xferMod
 static void                 Ut_I2c_Init                 ( const i2c_DataConfig_t * const dataConfig );
 static void                 Ut_I2c_Call_Isr             ( uint32_t isrFlags );
 static void                 Ut_I2c_Set_StartSent        ( void );
+static void                 Ut_I2c_Setup_DmaMocks       ( void );
+static i2c_DataConfig_t     Ut_I2c_Get_DmaDataConfig    ( void );
+static uint32_t             Ut_I2c_Find_DmaInit         ( i2c_DmaChannelId_t channelId );
+static utI2c_DmaChannel_t * Ut_I2c_Get_DmaChannel       ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel );
+static gpdma_RequestState_t Ut_I2c_DmaInitStub          ( gpdma_ConfigStruct_t * const configStruct, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaActiveStub        ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaInactiveStub      ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaIrqOnStub         ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaIrqOffStub        ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaPrioStub          ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_Priority_t channelPrio, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaBlockSizeStub     ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_BlockSize_t blockSize, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaSrcAddrStub       ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_SrcAddr_t sourceAddr, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaDstAddrStub       ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_DstAddr_t destAddr, int callCnt );
+static gpdma_RequestState_t Ut_I2c_DmaRemainingStub     ( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_BlockSize_t * const blockSize, int callCnt );
 static uint32_t             Ut_I2c_Get_Cr2Xfer          ( void );
 
 static void                 Ut_I2c_XferCompleteCallback ( void );
@@ -77,6 +106,18 @@ static void                 Ut_I2c_ErrorCallback        ( i2c_XferErrorId_t erro
 /** Size of long transfer (more than one NBYTES chunk) */
 #define UT_I2C_LONG_SIZE                    ( 300u )
 
+/** Count of GPDMA configurations stored by the Gpdma_Init() stub */
+#define UT_I2C_DMA_CFG_CNT                  ( 4u )
+
+/** Count of GPDMA channels recorded per GPDMA peripheral */
+#define UT_I2C_DMA_CHANNELS                 ( 16u )
+
+/** GPDMA errors reported to the user by the module */
+#define UT_I2C_DMA_ERROR_MASK               ( GPDMA_ERROR_TRANSFER | GPDMA_ERROR_CONFIG_UPDATE | GPDMA_ERROR_CONFIG_ERROR | GPDMA_ERROR_TRIG_OVERRUN )
+
+/** Interrupt enable bits of the transfer events (DMA moves the data - no TXIE / RXIE) */
+#define UT_I2C_DMA_EVENT_IRQS               ( I2C_CR1_NACKIE | I2C_CR1_STOPIE | I2C_CR1_TCIE | I2C_CR1_ERRIE )
+
 /* ============================== MACROS ==================================== */
 
 /** Expected CR2 transfer fields (SADD, NBYTES, AUTOEND / RELOAD, RD_WRN) */
@@ -104,6 +145,28 @@ static uint32_t                 utI2c_ErrorCnt;
 
 /** Parameter of the last error callback */
 static i2c_XferErrorId_t        utI2c_LastError;
+
+/** GPDMA configurations of Gpdma_Init() calls (structure and transfer configuration) */
+static gpdma_ConfigStruct_t     utI2c_DmaConfig[ UT_I2C_DMA_CFG_CNT ];
+static gpdma_TransferConfig_t   utI2c_DmaXferConfig[ UT_I2C_DMA_CFG_CNT ];
+static uint32_t                 utI2c_DmaInitCnt;
+
+/** Return values of the Gpdma_Init() and Gpdma_Set_ChannelActive() stubs */
+static gpdma_RequestState_t     utI2c_DmaInitState;
+static gpdma_RequestState_t     utI2c_DmaActiveState;
+
+/** Remaining block size returned by the Gpdma_Get_BlockSize() stub */
+static gpdma_BlockSize_t        utI2c_DmaRemaining;
+
+/** Records of GPDMA channel calls */
+static utI2c_DmaChannel_t       utI2c_DmaChannel[ GPDMA_PERIPH_CNT ][ UT_I2C_DMA_CHANNELS ];
+
+/**
+ * Selector of the GPDMA channels of the next DMA data configuration. The GPDMA channel
+ * ownership of the module is static (a configured channel is reused, Gpdma_Init() is not
+ * called again), so every DMA test configures channels different from the previous test.
+ */
+static uint32_t                 utI2c_DmaChannelSel;
 
 /* ============================ TEST FIXTURE ================================ */
 
@@ -238,7 +301,8 @@ void Ut_I2c_Init_InvalidConfig_ReturnsErrorWithoutAccess( void )
 /**
  * \brief   I2c_Init() rejects pin of other I2C peripheral.
  *
- * \details Initializes I2C1 with SCL pin of I2C2 (PB10).
+ * \details Initializes I2C1 with SCL pin of I2C2 (PB10, the code is built by the encoding macro -
+ *          the item of the pin table does not exist on STM32H543 / STM32H553).
  *
  * \par Expected results
  * - I2C_REQUEST_ERROR, no other module is called.
@@ -247,7 +311,7 @@ void Ut_I2c_Init_PinOfOtherPeripheral_ReturnsErrorWithoutAccess( void )
 {
     i2c_Config_t config = Ut_I2c_Get_Config();
 
-    config.SclPin = I2C_SCL_PIN_I2C2_PB10;
+    config.SclPin = (i2c_SclPin_t)I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2, GPIO_PORT_B, GPIO_PIN_ID_10, GPIO_ALT_FUNC_4 );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 }
@@ -1534,6 +1598,430 @@ void Ut_I2c_Isr_NoTransfer_FlagsIgnored( void )
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_ErrorCnt );
 }
 
+/* ----------------------------- DMA mode ----------------------------------- */
+
+/**
+ * \brief   DMA data configuration initializes the GPDMA channels of both directions.
+ *
+ * \details Initializes I2C1 with DMA data handling and evaluates the GPDMA configurations
+ *          passed to Gpdma_Init().
+ *
+ * \par Expected results
+ * - Gpdma_Init() 2x.
+ * - Transmission: memory to peripheral, request I2C1_TX, destination TXDR (static), source
+ *   address increment, 8-bit, priority and channel of the configuration.
+ * - Reception: peripheral to memory, request I2C1_RX, source RXDR (static), destination address
+ *   increment.
+ * - Error handler of both channels, no complete / half transfer handler, all GPDMA errors
+ *   reported, GPDMA interrupt of both channels enabled, DMA requests of the I2C disabled.
+ */
+void Ut_I2c_Init_DmaDataConfig_ChannelsInitialized( void )
+{
+    i2c_DataConfig_t dataConfig = Ut_I2c_Get_DmaDataConfig();
+    uint32_t         txIdx      = 0u;
+    uint32_t         rxIdx      = 0u;
+
+    Ut_I2c_Setup_DmaMocks();
+    Ut_I2c_Init( &dataConfig );
+
+    TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaInitCnt );
+
+    txIdx = Ut_I2c_Find_DmaInit( dataConfig.TxDmaChannelId );
+    rxIdx = Ut_I2c_Find_DmaInit( dataConfig.RxDmaChannelId );
+
+    TEST_ASSERT_EQUAL( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, utI2c_DmaConfig[ txIdx ].PeriphId );
+    TEST_ASSERT_EQUAL( (gpdma_Priority_t)dataConfig.TxDmaPriority, utI2c_DmaConfig[ txIdx ].ChannelPrio );
+    TEST_ASSERT_EQUAL( GPDMA_DIR_MEMORY_TO_PERIPH,  utI2c_DmaXferConfig[ txIdx ].Direction );
+    TEST_ASSERT_EQUAL( GPDMA_REQ_I2C1_TX,           utI2c_DmaXferConfig[ txIdx ].RequestSource );
+    TEST_ASSERT_EQUAL_HEX32( (uint32_t)(uintptr_t)&UT_I2C_REG->TXDR, utI2c_DmaXferConfig[ txIdx ].DestinationAddr );
+    TEST_ASSERT_EQUAL( GPDMA_ADDR_STATIC,           utI2c_DmaXferConfig[ txIdx ].DestinationAddrMode );
+    TEST_ASSERT_EQUAL( GPDMA_ADDR_INCREMENT,        utI2c_DmaXferConfig[ txIdx ].SourceAddrMode );
+    TEST_ASSERT_EQUAL( GPDMA_DATA_SIZE_8BITS,       utI2c_DmaXferConfig[ txIdx ].SourceDataSize );
+
+    TEST_ASSERT_EQUAL( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, utI2c_DmaConfig[ rxIdx ].PeriphId );
+    TEST_ASSERT_EQUAL( (gpdma_Priority_t)dataConfig.RxDmaPriority, utI2c_DmaConfig[ rxIdx ].ChannelPrio );
+    TEST_ASSERT_EQUAL( GPDMA_DIR_PERIPH_TO_MEMORY,  utI2c_DmaXferConfig[ rxIdx ].Direction );
+    TEST_ASSERT_EQUAL( GPDMA_REQ_I2C1_RX,           utI2c_DmaXferConfig[ rxIdx ].RequestSource );
+    TEST_ASSERT_EQUAL_HEX32( (uint32_t)(uintptr_t)&UT_I2C_REG->RXDR, utI2c_DmaXferConfig[ rxIdx ].SourceAddr );
+    TEST_ASSERT_EQUAL( GPDMA_ADDR_STATIC,           utI2c_DmaXferConfig[ rxIdx ].SourceAddrMode );
+    TEST_ASSERT_EQUAL( GPDMA_ADDR_INCREMENT,        utI2c_DmaXferConfig[ rxIdx ].DestinationAddrMode );
+
+    for( uint32_t cfgIdx = 0u; 2u > cfgIdx; cfgIdx++ )
+    {
+        TEST_ASSERT_NOT_NULL( utI2c_DmaConfig[ cfgIdx ].ErrorIsr );
+        TEST_ASSERT_NULL( utI2c_DmaConfig[ cfgIdx ].TransferCompleteIsr );
+        TEST_ASSERT_NULL( utI2c_DmaConfig[ cfgIdx ].HalfTransferIsr );
+        TEST_ASSERT_EQUAL( UT_I2C_DMA_ERROR_MASK, utI2c_DmaConfig[ cfgIdx ].ErrorMask );
+    }
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId )->IrqOnCnt );
+    TEST_ASSERT_EQUAL_UINT32( 1u, Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.RxDmaChannelId )->IrqOnCnt );
+    TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->CR1 & ( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN ) );
+}
+
+
+/**
+ * \brief   GPDMA initialization failure is reported.
+ *
+ * \details Gpdma_Init() returns error.
+ *
+ * \par Expected results
+ * - I2c_Init() returns I2C_REQUEST_ERROR.
+ */
+void Ut_I2c_Init_DmaInitFailure_ReturnsError( void )
+{
+    i2c_DataConfig_t dataConfig = Ut_I2c_Get_DmaDataConfig();
+    i2c_Config_t     config     = Ut_I2c_Get_Config();
+
+    config.DataConfig = &dataConfig;
+
+    Ut_I2c_Setup_DmaMocks();
+    Ut_I2c_Ignore_PeriphMocks();
+    utI2c_DmaInitState = GPDMA_REQUEST_ERROR;
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+}
+
+
+/**
+ * \brief   Configured GPDMA channels are reused, only the priority is updated.
+ *
+ * \details Initializes DMA data handling, then configures it again with the same channels and
+ *          other priorities.
+ *
+ * \par Expected results
+ * - Gpdma_Init() called only 2x (first configuration).
+ * - Second configuration: Gpdma_Set_Priority() with the new priorities, GPDMA interrupts enabled again.
+ */
+void Ut_I2c_Set_DataConfig_DmaSameChannels_PriorityUpdatedWithoutInit( void )
+{
+    i2c_DataConfig_t     dataConfig = Ut_I2c_Get_DmaDataConfig();
+    utI2c_DmaChannel_t * txChannel  = NULL;
+    utI2c_DmaChannel_t * rxChannel  = NULL;
+
+    Ut_I2c_Setup_DmaMocks();
+    txChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId );
+    rxChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.RxDmaChannelId );
+
+    Ut_I2c_Init( &dataConfig );
+    TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaInitCnt );
+
+    dataConfig.TxDmaPriority = I2C_DMA_PRIORITY_VERYHIGH;
+    dataConfig.RxDmaPriority = I2C_DMA_PRIORITY_MEDIUM;
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+
+    TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaInitCnt );
+    TEST_ASSERT_EQUAL_UINT32( 1u, txChannel->PrioCnt );
+    TEST_ASSERT_EQUAL( (gpdma_Priority_t)I2C_DMA_PRIORITY_VERYHIGH, txChannel->Prio );
+    TEST_ASSERT_EQUAL_UINT32( 1u, rxChannel->PrioCnt );
+    TEST_ASSERT_EQUAL( (gpdma_Priority_t)I2C_DMA_PRIORITY_MEDIUM, rxChannel->Prio );
+    TEST_ASSERT_EQUAL_UINT32( 2u, txChannel->IrqOnCnt );
+    TEST_ASSERT_EQUAL_UINT32( 2u, rxChannel->IrqOnCnt );
+}
+
+
+/**
+ * \brief   DMA write programs the transmit channel and ends by the STOP flag.
+ *
+ * \details Starts a 2 byte write and calls the captured ISR with STOPF (DMA moved all bytes).
+ *
+ * \par Expected results
+ * - Block size 2, source address the transmit buffer, channel enabled, TXDMAEN set, receive
+ *   channel not enabled, event interrupts enabled (no TXIE / RXIE).
+ * - Complete callback 1x, DMA requests disabled, both channels stopped.
+ */
+void Ut_I2c_Dma_Write_ChannelProgrammedAndStopCompletes( void )
+{
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
+    utI2c_DmaChannel_t *    txChannel  = NULL;
+    utI2c_DmaChannel_t *    rxChannel  = NULL;
+
+    Ut_I2c_Setup_DmaMocks();
+    txChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId );
+    rxChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.RxDmaChannelId );
+    Ut_I2c_Init( &dataConfig );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+    Ut_I2c_Set_StartSent();
+
+    TEST_ASSERT_EQUAL_UINT32( 2u, txChannel->BlockSize );
+    TEST_ASSERT_EQUAL_HEX32( (uint32_t)(uintptr_t)utI2c_TxBuf, txChannel->SrcAddr );
+    TEST_ASSERT_EQUAL_UINT32( 1u, txChannel->ActiveCnt );
+    TEST_ASSERT_EQUAL_UINT32( 0u, rxChannel->ActiveCnt );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_EVENT_IRQS, UT_I2C_REG->CR1 & ( UT_I2C_DMA_EVENT_IRQS | I2C_CR1_TXIE | I2C_CR1_RXIE ) );
+
+    const uint32_t txInactive = txChannel->InactiveCnt;
+    const uint32_t rxInactive = rxChannel->InactiveCnt;
+
+    utI2c_DmaRemaining = 0u;
+    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_CompleteCnt );
+    TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_ErrorCnt );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_GREATER_THAN_UINT32( txInactive, txChannel->InactiveCnt );
+    TEST_ASSERT_GREATER_THAN_UINT32( rxInactive, rxChannel->InactiveCnt );
+}
+
+
+/**
+ * \brief   DMA read programs the receive channel and ends by the STOP flag.
+ *
+ * \details Starts a 3 byte read and calls the captured ISR with STOPF (DMA moved all bytes).
+ *
+ * \par Expected results
+ * - Block size 3, destination address the receive buffer, channel enabled, RXDMAEN set, transmit
+ *   channel not enabled.
+ * - Complete callback 1x, DMA requests disabled.
+ */
+void Ut_I2c_Dma_Read_ChannelProgrammedAndStopCompletes( void )
+{
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = utI2c_RxBuf, .RxSize = 3u };
+    utI2c_DmaChannel_t *    txChannel  = NULL;
+    utI2c_DmaChannel_t *    rxChannel  = NULL;
+
+    Ut_I2c_Setup_DmaMocks();
+    txChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId );
+    rxChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.RxDmaChannelId );
+    Ut_I2c_Init( &dataConfig );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+    Ut_I2c_Set_StartSent();
+
+    TEST_ASSERT_EQUAL_UINT32( 3u, rxChannel->BlockSize );
+    TEST_ASSERT_EQUAL_HEX32( (uint32_t)(uintptr_t)utI2c_RxBuf, rxChannel->DstAddr );
+    TEST_ASSERT_EQUAL_UINT32( 1u, rxChannel->ActiveCnt );
+    TEST_ASSERT_EQUAL_UINT32( 0u, txChannel->ActiveCnt );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+
+    utI2c_DmaRemaining = 0u;
+    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_CompleteCnt );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+}
+
+
+/**
+ * \brief   DMA write followed by read programs both channels.
+ *
+ * \details Starts a 2 byte write with a 3 byte read (repeated start) and ends it by STOPF.
+ *
+ * \par Expected results
+ * - Both channels programmed (block sizes 2 and 3), TXDMAEN and RXDMAEN set, complete callback 1x.
+ */
+void Ut_I2c_Dma_WriteRead_BothChannelsProgrammed( void )
+{
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = utI2c_RxBuf, .RxSize = 3u };
+    utI2c_DmaChannel_t *    txChannel  = NULL;
+    utI2c_DmaChannel_t *    rxChannel  = NULL;
+
+    Ut_I2c_Setup_DmaMocks();
+    txChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId );
+    rxChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.RxDmaChannelId );
+    Ut_I2c_Init( &dataConfig );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+    Ut_I2c_Set_StartSent();
+
+    TEST_ASSERT_EQUAL_UINT32( 2u, txChannel->BlockSize );
+    TEST_ASSERT_EQUAL_UINT32( 3u, rxChannel->BlockSize );
+    TEST_ASSERT_EQUAL_UINT32( 1u, txChannel->ActiveCnt );
+    TEST_ASSERT_EQUAL_UINT32( 1u, rxChannel->ActiveCnt );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+
+    utI2c_DmaRemaining = 0u;
+    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_CompleteCnt );
+}
+
+
+/**
+ * \brief   STOP flag with unfinished DMA transfer is reported as DMA transfer error.
+ *
+ * \details Starts a 3 byte read, the receive channel reports 1 remaining byte at STOPF.
+ *
+ * \par Expected results
+ * - Error callback 1x with I2C_XFER_ERROR_DMA_TRANSFER, no complete callback.
+ */
+void Ut_I2c_Dma_StopWithUnfinishedDma_DmaTransferErrorReported( void )
+{
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = utI2c_RxBuf, .RxSize = 3u };
+
+    Ut_I2c_Setup_DmaMocks();
+    Ut_I2c_Init( &dataConfig );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+    Ut_I2c_Set_StartSent();
+
+    utI2c_DmaRemaining = 1u;
+    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_ErrorCnt );
+    TEST_ASSERT_EQUAL( I2C_XFER_ERROR_DMA_TRANSFER, utI2c_LastError );
+    TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
+}
+
+
+/**
+ * \brief   DMA transfer start reports GPDMA channel enable error.
+ *
+ * \details Gpdma_Set_ChannelActive() returns error.
+ *
+ * \par Expected results
+ * - I2C_REQUEST_ERROR for write and for read, transfer not started (second start possible).
+ */
+void Ut_I2c_Dma_Start_ChannelActivationError_ReturnsError( void )
+{
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t writeReq   = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
+    const i2c_XferRequest_t readReq    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = utI2c_RxBuf, .RxSize = 3u };
+
+    Ut_I2c_Setup_DmaMocks();
+    Ut_I2c_Init( &dataConfig );
+
+    utI2c_DmaActiveState = GPDMA_REQUEST_ERROR;
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( UT_I2C_PERIPH, &writeReq ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( UT_I2C_PERIPH, &readReq ) );
+    TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
+}
+
+
+/**
+ * \brief   GPDMA errors are reported to the user and abort the transfer.
+ *
+ * \details Starts a write and calls the transmit error handler captured from Gpdma_Init() with
+ *          the transfer, configuration, configuration update and trigger overrun error bits
+ *          (every call after a new transfer start), then the receive error handler.
+ *
+ * \par Expected results
+ * - Error callback with I2C_XFER_ERROR_DMA_TRANSFER / _DMA_CONFIG / _DMA_CONFIG_UPDATE /
+ *   _DMA_TRIGGER_OVERRUN for the respective bit, no complete callback.
+ */
+void Ut_I2c_Dma_GpdmaErrors_ReportedToUser( void )
+{
+    const struct
+    {
+        gpdma_ErrorMaskId_t DmaError;
+        i2c_XferErrorId_t   ErrorId;
+    }   errorLut[] =
+    {
+        { GPDMA_ERROR_TRANSFER,      I2C_XFER_ERROR_DMA_TRANSFER        },
+        { GPDMA_ERROR_CONFIG_ERROR,  I2C_XFER_ERROR_DMA_CONFIG          },
+        { GPDMA_ERROR_CONFIG_UPDATE, I2C_XFER_ERROR_DMA_CONFIG_UPDATE   },
+        { GPDMA_ERROR_TRIG_OVERRUN,  I2C_XFER_ERROR_DMA_TRIGGER_OVERRUN },
+    };
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = utI2c_RxBuf, .RxSize = 3u };
+    uint32_t                txIdx      = 0u;
+    uint32_t                rxIdx      = 0u;
+
+    Ut_I2c_Setup_DmaMocks();
+    Ut_I2c_Init( &dataConfig );
+    txIdx = Ut_I2c_Find_DmaInit( dataConfig.TxDmaChannelId );
+    rxIdx = Ut_I2c_Find_DmaInit( dataConfig.RxDmaChannelId );
+
+    for( uint32_t errIdx = 0u; ( sizeof( errorLut ) / sizeof( errorLut[ 0u ] ) ) > errIdx; errIdx++ )
+    {
+        utI2c_ErrorCnt  = 0u;
+        utI2c_LastError = I2C_XFER_ERROR_CNT;
+
+        TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+        Ut_I2c_Set_StartSent();
+
+        utI2c_DmaConfig[ txIdx ].ErrorIsr( errorLut[ errIdx ].DmaError );
+
+        TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_ErrorCnt );
+        TEST_ASSERT_EQUAL( errorLut[ errIdx ].ErrorId, utI2c_LastError );
+    }
+
+    utI2c_ErrorCnt  = 0u;
+    utI2c_LastError = I2C_XFER_ERROR_CNT;
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+    Ut_I2c_Set_StartSent();
+    utI2c_DmaConfig[ rxIdx ].ErrorIsr( GPDMA_ERROR_TRANSFER );
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_ErrorCnt );
+    TEST_ASSERT_EQUAL( I2C_XFER_ERROR_DMA_TRANSFER, utI2c_LastError );
+    TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
+}
+
+
+/**
+ * \brief   Deinitialization releases the GPDMA channels.
+ *
+ * \details Initializes DMA data handling and deinitializes the peripheral.
+ *
+ * \par Expected results
+ * - Both GPDMA channels stopped and their interrupts disabled, DMA requests of the I2C disabled.
+ */
+void Ut_I2c_Deinit_DmaDataConfig_ChannelsReleased( void )
+{
+    i2c_DataConfig_t     dataConfig = Ut_I2c_Get_DmaDataConfig();
+    utI2c_DmaChannel_t * txChannel  = NULL;
+    utI2c_DmaChannel_t * rxChannel  = NULL;
+
+    Ut_I2c_Setup_DmaMocks();
+    txChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId );
+    rxChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.RxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.RxDmaChannelId );
+    Ut_I2c_Init( &dataConfig );
+
+    const uint32_t txInactive = txChannel->InactiveCnt;
+    const uint32_t rxInactive = rxChannel->InactiveCnt;
+    const uint32_t txIrqOff   = txChannel->IrqOffCnt;
+    const uint32_t rxIrqOff   = rxChannel->IrqOffCnt;
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Deinit( UT_I2C_PERIPH ) );
+
+    TEST_ASSERT_GREATER_THAN_UINT32( txInactive, txChannel->InactiveCnt );
+    TEST_ASSERT_GREATER_THAN_UINT32( rxInactive, rxChannel->InactiveCnt );
+    TEST_ASSERT_EQUAL_UINT32( txIrqOff + 1u, txChannel->IrqOffCnt );
+    TEST_ASSERT_EQUAL_UINT32( rxIrqOff + 1u, rxChannel->IrqOffCnt );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+}
+
+
+/**
+ * \brief   Stopping a running DMA transfer disables the DMA requests and the channels.
+ *
+ * \details Starts a write and stops it by I2c_Set_XferStop().
+ *
+ * \par Expected results
+ * - Transmit channel stopped, TXDMAEN cleared.
+ */
+void Ut_I2c_Dma_XferStop_RunningTransfer_ChannelsAndRequestsStopped( void )
+{
+    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DmaDataConfig();
+    const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
+    utI2c_DmaChannel_t *    txChannel  = NULL;
+
+    Ut_I2c_Setup_DmaMocks();
+    txChannel = Ut_I2c_Get_DmaChannel( (gpdma_PeriphId_t)dataConfig.TxDmaPeriphId, (gpdma_ChannelId_t)dataConfig.TxDmaChannelId );
+    Ut_I2c_Init( &dataConfig );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+    Ut_I2c_Set_StartSent();
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+
+    const uint32_t inactiveCnt = txChannel->InactiveCnt;
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStop( UT_I2C_PERIPH ) );
+
+    TEST_ASSERT_GREATER_THAN_UINT32( inactiveCnt, txChannel->InactiveCnt );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+}
+
 /* ========================== LOCAL FUNCTIONS =============================== */
 
 /**
@@ -1624,6 +2112,10 @@ static void Ut_I2c_Ignore_PeriphMocks( void )
 static void Ut_I2c_Release( void )
 {
     Ut_I2c_Ignore_PeriphMocks();
+
+    /* Release of a DMA data handling disables the GPDMA channels (not ignored in the tests, which count the calls) */
+    Gpdma_Set_ChannelInactive_IgnoreAndReturn( GPDMA_REQUEST_OK );
+    Gpdma_Set_InterruptInactive_IgnoreAndReturn( GPDMA_REQUEST_OK );
 
     (void)I2c_Deinit( UT_I2C_PERIPH );
 
@@ -1750,4 +2242,196 @@ static void Ut_I2c_ErrorCallback( i2c_XferErrorId_t errorId )
 {
     utI2c_LastError = errorId;
     utI2c_ErrorCnt++;
+}
+
+
+/**
+ * \brief Installs the GPDMA stubs of a DMA test and clears the records.
+ */
+static void Ut_I2c_Setup_DmaMocks( void )
+{
+    (void)memset( utI2c_DmaConfig, 0, sizeof( utI2c_DmaConfig ) );
+    (void)memset( utI2c_DmaXferConfig, 0, sizeof( utI2c_DmaXferConfig ) );
+    (void)memset( utI2c_DmaChannel, 0, sizeof( utI2c_DmaChannel ) );
+
+    utI2c_DmaInitCnt     = 0u;
+    utI2c_DmaInitState   = GPDMA_REQUEST_OK;
+    utI2c_DmaActiveState = GPDMA_REQUEST_OK;
+    utI2c_DmaRemaining   = 0u;
+
+    Gpdma_Get_DefaultConfig_IgnoreAndReturn( GPDMA_REQUEST_OK );
+    Gpdma_Init_StubWithCallback( Ut_I2c_DmaInitStub );
+    Gpdma_Set_ChannelActive_StubWithCallback( Ut_I2c_DmaActiveStub );
+    Gpdma_Set_ChannelInactive_StubWithCallback( Ut_I2c_DmaInactiveStub );
+    Gpdma_Set_InterruptActive_StubWithCallback( Ut_I2c_DmaIrqOnStub );
+    Gpdma_Set_InterruptInactive_StubWithCallback( Ut_I2c_DmaIrqOffStub );
+    Gpdma_Set_Priority_StubWithCallback( Ut_I2c_DmaPrioStub );
+    Gpdma_Set_BlockSize_StubWithCallback( Ut_I2c_DmaBlockSizeStub );
+    Gpdma_Set_SourceAddr_StubWithCallback( Ut_I2c_DmaSrcAddrStub );
+    Gpdma_Set_DestinationAddr_StubWithCallback( Ut_I2c_DmaDstAddrStub );
+    Gpdma_Get_BlockSize_StubWithCallback( Ut_I2c_DmaRemainingStub );
+}
+
+
+/**
+ * \brief Returns DMA data configuration. Every call selects other GPDMA channels than the previous
+ *        call (the module keeps its channel ownership).
+ */
+static i2c_DataConfig_t Ut_I2c_Get_DmaDataConfig( void )
+{
+    i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+
+    dataConfig.TxDmaChannelId = (i2c_DmaChannelId_t)( ( 2u * utI2c_DmaChannelSel ) % (uint32_t)I2C_DMA_CHANNEL_CNT );
+    dataConfig.RxDmaChannelId = (i2c_DmaChannelId_t)( ( ( 2u * utI2c_DmaChannelSel ) + 1u ) % (uint32_t)I2C_DMA_CHANNEL_CNT );
+
+    utI2c_DmaChannelSel++;
+
+    return ( dataConfig );
+}
+
+
+/**
+ * \brief Returns index of the Gpdma_Init() record of the GPDMA channel.
+ *
+ * \param channelId [in]: GPDMA channel
+ */
+static uint32_t Ut_I2c_Find_DmaInit( i2c_DmaChannelId_t channelId )
+{
+    uint32_t foundIdx = UT_I2C_DMA_CFG_CNT;
+
+    for( uint32_t cfgIdx = 0u; ( UT_I2C_DMA_CFG_CNT > cfgIdx ) && ( UT_I2C_DMA_CFG_CNT == foundIdx ); cfgIdx++ )
+    {
+        if( ( cfgIdx < utI2c_DmaInitCnt ) && ( (gpdma_ChannelId_t)channelId == utI2c_DmaConfig[ cfgIdx ].ChannelId ) )
+        {
+            foundIdx = cfgIdx;
+        }
+        else
+        {
+            /* Other channel */
+        }
+    }
+
+    TEST_ASSERT_LESS_THAN_UINT32_MESSAGE( UT_I2C_DMA_CFG_CNT, foundIdx, "GPDMA channel was not initialized" );
+
+    return ( foundIdx );
+}
+
+
+/** \brief Returns record of the GPDMA channel calls */
+static utI2c_DmaChannel_t * Ut_I2c_Get_DmaChannel( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel )
+{
+    TEST_ASSERT_LESS_THAN_UINT32( GPDMA_PERIPH_CNT, (uint32_t)dmaBus );
+    TEST_ASSERT_LESS_THAN_UINT32( UT_I2C_DMA_CHANNELS, (uint32_t)dmaChannel );
+
+    return ( &utI2c_DmaChannel[ dmaBus ][ dmaChannel ] );
+}
+
+
+/** \brief Gpdma_Init() stub - stores the configuration */
+static gpdma_RequestState_t Ut_I2c_DmaInitStub( gpdma_ConfigStruct_t * const configStruct, int callCnt )
+{
+    (void)callCnt;
+
+    TEST_ASSERT_NOT_NULL( configStruct );
+    TEST_ASSERT_NOT_NULL( configStruct->TransferConfig );
+
+    if( UT_I2C_DMA_CFG_CNT > utI2c_DmaInitCnt )
+    {
+        utI2c_DmaConfig[ utI2c_DmaInitCnt ]     = *configStruct;
+        utI2c_DmaXferConfig[ utI2c_DmaInitCnt ] = *configStruct->TransferConfig;
+    }
+    else
+    {
+        /* Record buffer full */
+    }
+
+    utI2c_DmaInitCnt++;
+
+    return ( utI2c_DmaInitState );
+}
+
+
+/** \brief Gpdma_Set_ChannelActive() stub - returns \ref utI2c_DmaActiveState */
+static gpdma_RequestState_t Ut_I2c_DmaActiveStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->ActiveCnt++;
+    return ( utI2c_DmaActiveState );
+}
+
+
+/** \brief Gpdma_Set_ChannelInactive() stub */
+static gpdma_RequestState_t Ut_I2c_DmaInactiveStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->InactiveCnt++;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Set_InterruptActive() stub */
+static gpdma_RequestState_t Ut_I2c_DmaIrqOnStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->IrqOnCnt++;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Set_InterruptInactive() stub */
+static gpdma_RequestState_t Ut_I2c_DmaIrqOffStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->IrqOffCnt++;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Set_Priority() stub */
+static gpdma_RequestState_t Ut_I2c_DmaPrioStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_Priority_t channelPrio, int callCnt )
+{
+    utI2c_DmaChannel_t * const channel = Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel );
+
+    (void)callCnt;
+    channel->PrioCnt++;
+    channel->Prio = channelPrio;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Set_BlockSize() stub */
+static gpdma_RequestState_t Ut_I2c_DmaBlockSizeStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_BlockSize_t blockSize, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->BlockSize = blockSize;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Set_SourceAddr() stub */
+static gpdma_RequestState_t Ut_I2c_DmaSrcAddrStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_SrcAddr_t sourceAddr, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->SrcAddr = sourceAddr;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Set_DestinationAddr() stub */
+static gpdma_RequestState_t Ut_I2c_DmaDstAddrStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_DstAddr_t destAddr, int callCnt )
+{
+    (void)callCnt;
+    Ut_I2c_Get_DmaChannel( dmaBus, dmaChannel )->DstAddr = destAddr;
+    return ( GPDMA_REQUEST_OK );
+}
+
+
+/** \brief Gpdma_Get_BlockSize() stub - returns \ref utI2c_DmaRemaining */
+static gpdma_RequestState_t Ut_I2c_DmaRemainingStub( gpdma_PeriphId_t dmaBus, gpdma_ChannelId_t dmaChannel, gpdma_BlockSize_t * const blockSize, int callCnt )
+{
+    (void)callCnt;
+    (void)dmaBus;
+    (void)dmaChannel;
+    *blockSize = utI2c_DmaRemaining;
+    return ( GPDMA_REQUEST_OK );
 }

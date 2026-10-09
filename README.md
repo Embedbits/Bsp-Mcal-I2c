@@ -84,7 +84,7 @@ const i2c_XferRequest_t request =
 (void)I2c_Set_XferStart( I2C_PERIPH_1, &request );
 ```
 
-SCL / SDA pins are selected from `i2c_SclPin_t` / `i2c_SdaPin_t` - only pins available on the selected device (STM32H503, H523/H533, H562, H563/H573, H5E4/H5F4, H5E5/H5F5) are defined. The pin must belong to `PeriphId`, otherwise `I2c_Init()` returns error. Pin tables were generated from `EmBi_Platform/Docs/AF`.
+SCL / SDA pins are selected from `i2c_SclPin_t` / `i2c_SdaPin_t` - every pin item is active on exactly the CMSIS device lines whose package or die has the pin according to the STM32CubeMX GPIO modes database (guards by the device line). The pin must belong to `PeriphId`, otherwise `I2c_Init()` returns error.
 
 ---
 

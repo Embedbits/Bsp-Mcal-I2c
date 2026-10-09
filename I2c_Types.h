@@ -56,24 +56,21 @@ extern "C" {
 #define I2C_BIT_MASK_FIELD                  ( 0x1Fu )
 
 /**
- * Alternate function map of the device family (pin tables in EmBi_Platform/Docs/AF). Devices of
- * one family share an identical I2C pin / alternate function map.
+ * The pin tables are guarded by the device line (STM32CubeMX GPIO database) - a device line
+ * without a pin table is refused.
  */
-#if defined(STM32H503xx)
-#define I2C_AF_MAP_H503
-#elif defined(STM32H523xx) || defined(STM32H533xx)
-#define I2C_AF_MAP_H523_H533
-#elif defined(STM32H562xx)
-#define I2C_AF_MAP_H562
-#elif defined(STM32H563xx) || defined(STM32H573xx)
-#define I2C_AF_MAP_H563_H573
-#elif defined(STM32H5E4xx) || defined(STM32H5F4xx)
-#define I2C_AF_MAP_H5E4_H5F4
-#elif defined(STM32H5E5xx) || defined(STM32H5F5xx)
-#define I2C_AF_MAP_H5E5_H5F5
-#elif defined(STM32H543xx) || defined(STM32H553xx)
-#define I2C_AF_MAP_H554_H553
-#else
+#if !defined(STM32H503xx) && \
+    !defined(STM32H523xx) && \
+    !defined(STM32H533xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx) && \
+    !defined(STM32H562xx) && \
+    !defined(STM32H563xx) && \
+    !defined(STM32H573xx) && \
+    !defined(STM32H5E4xx) && \
+    !defined(STM32H5E5xx) && \
+    !defined(STM32H5F4xx) && \
+    !defined(STM32H5F5xx)
 #error "I2c: I2C pin / alternate function map of the selected device is not defined"
 #endif
 
@@ -244,102 +241,82 @@ typedef enum
 /** \brief List of SCL pins available for I2C peripherals (source: EmBi_Platform/Docs/AF) */
 typedef enum
 {
-#ifdef I2C1
-#ifdef GPIOB
     I2C_SCL_PIN_I2C1_PB6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_4   ), /**< I2C1 SCL pin connected to PB6 */
     I2C_SCL_PIN_I2C1_PB8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C1 SCL pin connected to PB8 */
-#endif
-#ifdef GPIOC
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SCL_PIN_I2C1_PC8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_C  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C1 SCL pin connected to PC8 */
 #endif
-#endif
-#ifdef GPIOK
-#if defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E5xx) || \
+    defined(STM32H5F5xx)
     I2C_SCL_PIN_I2C1_PK9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_K  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_4   ), /**< I2C1 SCL pin connected to PK9 */
 #endif
-#endif
-#endif /* I2C1 */
 
-#ifdef I2C2
-#ifdef GPIOB
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SCL_PIN_I2C2_PB3       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_3  , GPIO_ALT_FUNC_8   ), /**< I2C2 SCL pin connected to PB3 */
-#endif
-#if defined(I2C_AF_MAP_H503)
     I2C_SCL_PIN_I2C2_PB5       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_5  , GPIO_ALT_FUNC_8   ), /**< I2C2 SCL pin connected to PB5 */
 #endif
+#if !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SCL_PIN_I2C2_PB10      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_10 , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PB10 */
 #endif
-#ifdef GPIOC
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SCL_PIN_I2C2_PC6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_C  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_8   ), /**< I2C2 SCL pin connected to PC6 */
-#endif
-#if defined(I2C_AF_MAP_H503)
     I2C_SCL_PIN_I2C2_PC10      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_C  , GPIO_PIN_ID_10 , GPIO_ALT_FUNC_8   ), /**< I2C2 SCL pin connected to PC10 */
 #endif
-#endif
-#ifdef GPIOD
-#if defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E4xx) || \
+    defined(STM32H5E5xx) || \
+    defined(STM32H5F4xx) || \
+    defined(STM32H5F5xx)
     I2C_SCL_PIN_I2C2_PD2       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_D  , GPIO_PIN_ID_2  , GPIO_ALT_FUNC_6   ), /**< I2C2 SCL pin connected to PD2 */
 #endif
-#if defined(I2C_AF_MAP_H554_H553)
+#if defined(STM32H543xx) || \
+    defined(STM32H553xx)
     I2C_SCL_PIN_I2C2_PD12      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_D  , GPIO_PIN_ID_12 , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PD12 */
 #endif
-#endif
-#ifdef GPIOF
-#if defined(I2C_AF_MAP_H523_H533) || defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5) || defined(I2C_AF_MAP_H554_H553)
+#if !defined(STM32H503xx)
     I2C_SCL_PIN_I2C2_PF1       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_F  , GPIO_PIN_ID_1  , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PF1 */
 #endif
-#endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if !defined(STM32H503xx) && \
+    !defined(STM32H523xx) && \
+    !defined(STM32H533xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SCL_PIN_I2C2_PH4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_H  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PH4 */
 #endif
-#endif
-#endif /* I2C2 */
 
-#ifdef I2C3
-#ifdef GPIOA
+#if defined(I2C3)
     I2C_SCL_PIN_I2C3_PA8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_A  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PA8 */
-#endif
-#ifdef GPIOD
-#if defined(I2C_AF_MAP_H523_H533) || defined(I2C_AF_MAP_H554_H553)
+#if defined(STM32H523xx) || \
+    defined(STM32H533xx) || \
+    defined(STM32H543xx) || \
+    defined(STM32H553xx)
     I2C_SCL_PIN_I2C3_PD6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_D  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PD6 */
 #endif
-#if defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E4xx) || \
+    defined(STM32H5E5xx) || \
+    defined(STM32H5F4xx) || \
+    defined(STM32H5F5xx)
     I2C_SCL_PIN_I2C3_PD7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_D  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PD7 */
 #endif
-#endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if !defined(STM32H523xx) && \
+    !defined(STM32H533xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SCL_PIN_I2C3_PH7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_H  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PH7 */
 #endif
-#endif
-#ifdef GPIOJ
-#if defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E5xx) || \
+    defined(STM32H5F5xx)
     I2C_SCL_PIN_I2C3_PJ14      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_J  , GPIO_PIN_ID_14 , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PJ14 */
-#endif
 #endif
 #endif /* I2C3 */
 
-#ifdef I2C4
-#ifdef GPIOB
+#if defined(I2C4)
     I2C_SCL_PIN_I2C4_PB6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_B  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_6   ), /**< I2C4 SCL pin connected to PB6 */
     I2C_SCL_PIN_I2C4_PB8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_B  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_6   ), /**< I2C4 SCL pin connected to PB8 */
-#endif
-#ifdef GPIOD
     I2C_SCL_PIN_I2C4_PD12      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_D  , GPIO_PIN_ID_12 , GPIO_ALT_FUNC_4   ), /**< I2C4 SCL pin connected to PD12 */
-#endif
-#ifdef GPIOF
     I2C_SCL_PIN_I2C4_PF5       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_F  , GPIO_PIN_ID_5  , GPIO_ALT_FUNC_4   ), /**< I2C4 SCL pin connected to PF5 */
-#endif
-#ifdef GPIOG
     I2C_SCL_PIN_I2C4_PG7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_G  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C4 SCL pin connected to PG7 */
-#endif
-#ifdef GPIOH
     I2C_SCL_PIN_I2C4_PH11      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_H  , GPIO_PIN_ID_11 , GPIO_ALT_FUNC_4   ), /**< I2C4 SCL pin connected to PH11 */
-#endif
 #endif /* I2C4 */
 
     I2C_SCL_PIN_UNUSED         = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_CNT, GPIO_PORT_CNT, GPIO_PIN_ID_CNT, GPIO_ALT_FUNC_CNT )  /**< Pin is not configured by the module */
@@ -349,126 +326,104 @@ typedef enum
 /** \brief List of SDA pins available for I2C peripherals (source: EmBi_Platform/Docs/AF) */
 typedef enum
 {
-#ifdef I2C1
-#ifdef GPIOB
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SDA_PIN_I2C1_PB5       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_5  , GPIO_ALT_FUNC_11  ), /**< I2C1 SDA pin connected to PB5 */
 #endif
     I2C_SDA_PIN_I2C1_PB7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C1 SDA pin connected to PB7 */
-#if defined(I2C_AF_MAP_H523_H533) || defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5) || defined(I2C_AF_MAP_H554_H553)
+#if !defined(STM32H503xx)
     I2C_SDA_PIN_I2C1_PB9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_4   ), /**< I2C1 SDA pin connected to PB9 */
 #endif
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SDA_PIN_I2C1_PB10      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_10 , GPIO_ALT_FUNC_11  ), /**< I2C1 SDA pin connected to PB10 */
-#endif
-#endif
-#ifdef GPIOC
-#if defined(I2C_AF_MAP_H503)
     I2C_SDA_PIN_I2C1_PC9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_C  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_4   ), /**< I2C1 SDA pin connected to PC9 */
 #endif
-#endif
-#ifdef GPIOD
-#if defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E4xx) || \
+    defined(STM32H5E5xx) || \
+    defined(STM32H5F4xx) || \
+    defined(STM32H5F5xx)
     I2C_SDA_PIN_I2C1_PD13      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_D  , GPIO_PIN_ID_13 , GPIO_ALT_FUNC_6   ), /**< I2C1 SDA pin connected to PD13 */
 #endif
-#endif
-#ifdef GPIOK
-#if defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E5xx) || \
+    defined(STM32H5F5xx)
     I2C_SDA_PIN_I2C1_PK10      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_K  , GPIO_PIN_ID_10 , GPIO_ALT_FUNC_4   ), /**< I2C1 SDA pin connected to PK10 */
 #endif
-#endif
-#endif /* I2C1 */
 
-#ifdef I2C2
-#ifdef GPIOB
     I2C_SDA_PIN_I2C2_PB3       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_3  , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PB3 */
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SDA_PIN_I2C2_PB4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_8   ), /**< I2C2 SDA pin connected to PB4 */
-#endif
-#if defined(I2C_AF_MAP_H503)
     I2C_SDA_PIN_I2C2_PB8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_8   ), /**< I2C2 SDA pin connected to PB8 */
 #endif
-#if defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if !defined(STM32H503xx) && \
+    !defined(STM32H523xx) && \
+    !defined(STM32H533xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SDA_PIN_I2C2_PB11      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_11 , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PB11 */
 #endif
-#if defined(I2C_AF_MAP_H523_H533) || defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if !defined(STM32H503xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SDA_PIN_I2C2_PB12      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_12 , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PB12 */
 #endif
-#if defined(I2C_AF_MAP_H503)
+#if defined(STM32H503xx)
     I2C_SDA_PIN_I2C2_PB13      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_13 , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PB13 */
-#endif
-#endif
-#ifdef GPIOC
-#if defined(I2C_AF_MAP_H503)
     I2C_SDA_PIN_I2C2_PC7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_C  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_8   ), /**< I2C2 SDA pin connected to PC7 */
-#endif
-#if defined(I2C_AF_MAP_H503)
     I2C_SDA_PIN_I2C2_PC11      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_C  , GPIO_PIN_ID_11 , GPIO_ALT_FUNC_8   ), /**< I2C2 SDA pin connected to PC11 */
 #endif
-#endif
-#ifdef GPIOD
-#if defined(I2C_AF_MAP_H554_H553)
+#if defined(STM32H543xx) || \
+    defined(STM32H553xx)
     I2C_SDA_PIN_I2C2_PD13      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_D  , GPIO_PIN_ID_13 , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PD13 */
 #endif
-#endif
-#ifdef GPIOF
-#if defined(I2C_AF_MAP_H523_H533) || defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5) || defined(I2C_AF_MAP_H554_H553)
+#if !defined(STM32H503xx)
     I2C_SDA_PIN_I2C2_PF0       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_F  , GPIO_PIN_ID_0  , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PF0 */
 #endif
-#endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if !defined(STM32H503xx) && \
+    !defined(STM32H523xx) && \
+    !defined(STM32H533xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SDA_PIN_I2C2_PH5       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_H  , GPIO_PIN_ID_5  , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PH5 */
 #endif
-#endif
-#endif /* I2C2 */
 
-#ifdef I2C3
-#ifdef GPIOB
-#if defined(I2C_AF_MAP_H523_H533) || defined(I2C_AF_MAP_H554_H553)
+#if defined(I2C3)
+#if defined(STM32H523xx) || \
+    defined(STM32H533xx) || \
+    defined(STM32H543xx) || \
+    defined(STM32H553xx)
     I2C_SDA_PIN_I2C3_PB4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_B  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_9   ), /**< I2C3 SDA pin connected to PB4 */
 #endif
-#endif
-#ifdef GPIOC
     I2C_SDA_PIN_I2C3_PC9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_C  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PC9 */
-#endif
-#ifdef GPIOD
-#if defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E4xx) || \
+    defined(STM32H5E5xx) || \
+    defined(STM32H5F4xx) || \
+    defined(STM32H5F5xx)
     I2C_SDA_PIN_I2C3_PD6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_D  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PD6 */
 #endif
-#if defined(I2C_AF_MAP_H523_H533)
+#if defined(STM32H523xx) || \
+    defined(STM32H533xx) || \
+    defined(STM32H543xx) || \
+    defined(STM32H553xx)
     I2C_SDA_PIN_I2C3_PD7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_D  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PD7 */
 #endif
-#endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_H562) || defined(I2C_AF_MAP_H563_H573) || defined(I2C_AF_MAP_H5E4_H5F4) || defined(I2C_AF_MAP_H5E5_H5F5)
+#if !defined(STM32H523xx) && \
+    !defined(STM32H533xx) && \
+    !defined(STM32H543xx) && \
+    !defined(STM32H553xx)
     I2C_SDA_PIN_I2C3_PH8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_H  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PH8 */
 #endif
-#endif
-#ifdef GPIOJ
-#if defined(I2C_AF_MAP_H5E5_H5F5)
+#if defined(STM32H5E5xx) || \
+    defined(STM32H5F5xx)
     I2C_SDA_PIN_I2C3_PJ15      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_J  , GPIO_PIN_ID_15 , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PJ15 */
-#endif
 #endif
 #endif /* I2C3 */
 
-#ifdef I2C4
-#ifdef GPIOB
+#if defined(I2C4)
     I2C_SDA_PIN_I2C4_PB7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_B  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_6   ), /**< I2C4 SDA pin connected to PB7 */
     I2C_SDA_PIN_I2C4_PB9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_B  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_6   ), /**< I2C4 SDA pin connected to PB9 */
-#endif
-#ifdef GPIOD
     I2C_SDA_PIN_I2C4_PD13      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_D  , GPIO_PIN_ID_13 , GPIO_ALT_FUNC_4   ), /**< I2C4 SDA pin connected to PD13 */
-#endif
-#ifdef GPIOF
     I2C_SDA_PIN_I2C4_PF15      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_F  , GPIO_PIN_ID_15 , GPIO_ALT_FUNC_4   ), /**< I2C4 SDA pin connected to PF15 */
-#endif
-#ifdef GPIOG
     I2C_SDA_PIN_I2C4_PG6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_G  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_4   ), /**< I2C4 SDA pin connected to PG6 */
-#endif
-#ifdef GPIOH
     I2C_SDA_PIN_I2C4_PH12      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_4 , GPIO_PORT_H  , GPIO_PIN_ID_12 , GPIO_ALT_FUNC_4   ), /**< I2C4 SDA pin connected to PH12 */
-#endif
 #endif /* I2C4 */
 
     I2C_SDA_PIN_UNUSED         = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_CNT, GPIO_PORT_CNT, GPIO_PIN_ID_CNT, GPIO_ALT_FUNC_CNT )  /**< Pin is not configured by the module */
