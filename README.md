@@ -23,7 +23,7 @@ Not supported: slave mode, SMBus, FMPI2C1 (STM32F410 / 412 / 413 / 423 / 446), F
 
 - Transfer end: the STOP condition is requested at the end of the transfer, the next `I2c_Set_XferStart()` waits until it is sent.
 - Transfer abort (`I2c_Set_XferStop()`, DMA / sequencing errors) uses software reset (SWRST) with restored configuration - clearing PE does not stop a running communication on I2C v1.
-- DMA mode: `TxDmaChannelId` / `RxDmaChannelId` identify DMA1 **streams** connected to the I2C request of the direction (e.g. STM32F407 I2C1: RX stream 0 / 5, TX stream 6 / 7), channel selection is derived by the module. Single byte reception is done by I2C interrupt (DMA can not NACK a single byte).
+- DMA mode: `TxDma` / `RxDma` select the DMA1 **stream** from the lists `i2c_TxDma_t` / `i2c_RxDma_t` - one item per I2C peripheral and stream, named `I2C_TX_DMA_I2Cx_DMA1_STREAMz` / `I2C_RX_DMA_I2Cx_DMA1_STREAMz` (e.g. STM32F407 I2C1: RX `I2C_RX_DMA_I2C1_DMA1_STREAM0` / `..._STREAM5`, TX `I2C_TX_DMA_I2C1_DMA1_STREAM6` / `..._STREAM7`), the channel selection of the stream is part of the item. Items of another I2C peripheral, items of the other direction and `I2C_TX_DMA_UNUSED` / `I2C_RX_DMA_UNUSED` are refused in the DMA mode, items of streams existing only on some device lines are guarded by the CMSIS device line. Single byte reception is done by I2C interrupt (DMA can not NACK a single byte).
 - Device errata handling: spurious bus error (BERR) in master mode is cleared and ignored. Repeated START setup time may be violated in Standard-mode above 88 kHz - use up to 88 kHz or Fast-mode with strict slaves.
 - STM32F4 LL `LL_I2C_IsEnabledAnalogFilter()` returns inverted state - the module reads FLTR ANOFF directly.
 
@@ -93,7 +93,7 @@ const i2c_XferRequest_t request =
 (void)I2c_Set_XferStart( I2C_PERIPH_1, &request );
 ```
 
-SCL / SDA pins are selected from `i2c_SclPin_t` / `i2c_SdaPin_t` - only pins available on the selected device family (F405/F415, F407/F417/F42x/F43x/F469/F479, F401, F410/F411/F412/F413/F423, F446) are defined. The pin must belong to `PeriphId`, otherwise `I2c_Init()` returns error. Pin and DMA request tables were generated from embassy stm32-data of all STM32F4 devices (pins missing in small packages are not distinguished).
+SCL / SDA pins are selected from `i2c_SclPin_t` / `i2c_SdaPin_t` - every pin item is active on exactly the CMSIS device lines whose package or die has the pin according to the STM32CubeMX GPIO modes database (guards by the device line). The pin must belong to `PeriphId`, otherwise `I2c_Init()` returns error.
 
 ---
 

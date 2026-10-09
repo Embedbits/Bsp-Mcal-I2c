@@ -89,7 +89,7 @@ typedef uint32_t i2c_DmaCr2Mask_t;
 
 /* ======================== FORWARD DECLARATIONS ============================ */
 
-static i2c_RequestState_t I2c_Dma_Get_ChannelSel  ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, i2c_DmaPeriphId_t dmaId, i2c_DmaChannelId_t streamId, dma_PeriphReqId_t * const channelSel );
+static i2c_RequestState_t I2c_Dma_Get_ChannelSel  ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, i2c_DmaCode_t dmaCode, dma_PeriphReqId_t * const channelSel );
 static i2c_RequestState_t I2c_Dma_Set_StreamInit  ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 static i2c_RequestState_t I2c_Dma_Set_StreamOff   ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 static i2c_RequestState_t I2c_Dma_Set_Transfer    ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
@@ -174,9 +174,10 @@ static i2c_DmaStreamState_t i2c_DmaStreamState[ I2C_PERIPH_CNT ][ I2C_DMA_DIR_CN
 /* ========================= EXPORTED FUNCTIONS ============================= */
 
 /**
- * \brief Checks DMA specific part of data handling configuration - DMA peripheral, streams and
- *        priorities in range, both streams connected to the I2C request of their direction and
- *        transmit / receive streams differ
+ * \brief Checks DMA specific part of data handling configuration - priorities in range and both
+ *        streams are items of the lists \ref i2c_TxDma_t / \ref i2c_RxDma_t of the I2C peripheral
+ *        (the streams of the I2C requests of their direction, transmission and reception never
+ *        share a stream)
  *
  * \param periphId   [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  * \param dataConfig [in]: Pointer to data handling configuration. Must not be NULL.
@@ -195,21 +196,19 @@ i2c_RequestState_t I2c_Dma_Check_Config( i2c_PeriphId_t periphId, const i2c_Data
         dma_PeriphReqId_t rxChannelSel = DMA_REQ_CHANNEL_0;
 
         if( ( (uint32_t)DMA_PRIORITY_CNT  > (uint32_t)dataConfig->TxDmaPriority ) &&
-            ( (uint32_t)DMA_PRIORITY_CNT  > (uint32_t)dataConfig->RxDmaPriority ) &&
-            ( ( dataConfig->TxDmaPeriphId  != dataConfig->RxDmaPeriphId  ) ||
-              ( dataConfig->TxDmaChannelId != dataConfig->RxDmaChannelId )    )    )
+            ( (uint32_t)DMA_PRIORITY_CNT  > (uint32_t)dataConfig->RxDmaPriority )    )
         {
-            retState = I2c_Dma_Get_ChannelSel( periphId, I2C_DMA_DIR_TX, dataConfig->TxDmaPeriphId, dataConfig->TxDmaChannelId, &txChannelSel );
+            retState = I2c_Dma_Get_ChannelSel( periphId, I2C_DMA_DIR_TX, (i2c_DmaCode_t)dataConfig->TxDma, &txChannelSel );
         }
         else
         {
-            /* Priority out of range or both directions share one stream */
+            /* Priority out of range */
             retState = I2C_REQUEST_ERROR;
         }
 
         if( I2C_REQUEST_OK == retState )
         {
-            retState = I2c_Dma_Get_ChannelSel( periphId, I2C_DMA_DIR_RX, dataConfig->RxDmaPeriphId, dataConfig->RxDmaChannelId, &rxChannelSel );
+            retState = I2c_Dma_Get_ChannelSel( periphId, I2C_DMA_DIR_RX, (i2c_DmaCode_t)dataConfig->RxDma, &rxChannelSel );
         }
         else
         {
@@ -494,29 +493,36 @@ i2c_RequestState_t I2c_Dma_Check_Done( i2c_PeriphId_t periphId )
 /**
  * \brief Finds channel selection of the stream connected to the I2C request of the direction
  *
+ * The DMA peripheral and the stream are decoded from the item of the DMA stream list, the item has to
+ * belong to the I2C peripheral.
+ *
  * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  * \param dmaDir      [in]: Transfer direction
- * \param dmaId       [in]: DMA peripheral
- * \param streamId    [in]: DMA stream
+ * \param dmaCode     [in]: Item of \ref i2c_TxDma_t / \ref i2c_RxDma_t (encoded DMA stream)
  * \param channelSel [out]: Pointer to store the channel selection. Must not be NULL.
  *
  * \return Returns \ref I2C_REQUEST_OK if the stream is connected to the request. Otherwise
  *         returns \ref I2C_REQUEST_ERROR.
  */
-static i2c_RequestState_t I2c_Dma_Get_ChannelSel( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, i2c_DmaPeriphId_t dmaId, i2c_DmaChannelId_t streamId, dma_PeriphReqId_t * const channelSel )
+static i2c_RequestState_t I2c_Dma_Get_ChannelSel( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, i2c_DmaCode_t dmaCode, dma_PeriphReqId_t * const channelSel )
 {
     i2c_RequestState_t retState = I2C_REQUEST_ERROR;
 
     if( I2C_NULL_PTR != channelSel )
     {
+        const uint32_t codePeriph = I2C_DMA_BIT_MASK_DECODE_PERIPH( dmaCode );
+        const uint32_t codeDmaId  = I2C_DMA_BIT_MASK_DECODE_DMA( dmaCode );
+        const uint32_t codeStream = I2C_DMA_BIT_MASK_DECODE_STREAM( dmaCode );
+
         for( uint32_t mapIdx = 0u; I2C_DMA_REQ_MAP_CNT > mapIdx; mapIdx ++ )
         {
             const i2c_DmaReqMap_t * const mapEntry = &i2c_DmaReqMap[ mapIdx ];
 
-            if( ( periphId == mapEntry->PeriphId ) &&
-                ( dmaDir   == mapEntry->Dir      ) &&
-                ( dmaId    == mapEntry->DmaId    ) &&
-                ( streamId == mapEntry->StreamId )    )
+            if( ( codePeriph == (uint32_t)periphId           ) &&
+                ( periphId   == mapEntry->PeriphId           ) &&
+                ( dmaDir     == mapEntry->Dir                ) &&
+                ( codeDmaId  == (uint32_t)mapEntry->DmaId    ) &&
+                ( codeStream == (uint32_t)mapEntry->StreamId )    )
             {
                 *channelSel = mapEntry->ChannelSel;
                 retState    = I2C_REQUEST_OK;
@@ -573,8 +579,7 @@ static i2c_RequestState_t I2c_Dma_Set_StreamInit( i2c_PeriphId_t periphId, i2c_D
         dma_ConfigStruct_t               dmaConfig;
         dma_PeriphReqId_t                channelSel = DMA_REQ_CHANNEL_0;
         dma_RequestState_t               dmaState   = DMA_REQUEST_ERROR;
-        i2c_DmaPeriphId_t                dmaId      = xferCtx->Config.TxDmaPeriphId;
-        i2c_DmaChannelId_t               streamId   = xferCtx->Config.TxDmaChannelId;
+        i2c_DmaCode_t                    dmaCode    = (i2c_DmaCode_t)xferCtx->Config.TxDma;
         i2c_DmaPriority_t                dmaPrio    = xferCtx->Config.TxDmaPriority;
 
         dmaState = Dma_Get_DefaultConfig( &dmaConfig );
@@ -597,19 +602,18 @@ static i2c_RequestState_t I2c_Dma_Set_StreamInit( i2c_PeriphId_t periphId, i2c_D
         }
         else
         {
-            dmaId    = xferCtx->Config.RxDmaPeriphId;
-            streamId = xferCtx->Config.RxDmaChannelId;
-            dmaPrio  = xferCtx->Config.RxDmaPriority;
+            dmaCode = (i2c_DmaCode_t)xferCtx->Config.RxDma;
+            dmaPrio = xferCtx->Config.RxDmaPriority;
 
             dmaConfig.Direction                = DMA_DIR_PERIPH_TO_MEMORY;
             dmaConfig.TransferCompleteCallback = isrConfig->RxCompleteIsr;
             dmaConfig.TransferErrorCallback    = isrConfig->RxErrorIsr;
         }
 
-        const i2c_RequestState_t mapState = I2c_Dma_Get_ChannelSel( periphId, dmaDir, dmaId, streamId, &channelSel );
+        const i2c_RequestState_t mapState = I2c_Dma_Get_ChannelSel( periphId, dmaDir, dmaCode, &channelSel );
 
-        dmaConfig.DmaPeriphId     = (dma_PeriphId_t)dmaId;
-        dmaConfig.DmaChannel      = (dma_ChannelId_t)streamId;
+        dmaConfig.DmaPeriphId     = (dma_PeriphId_t)I2C_DMA_BIT_MASK_DECODE_DMA( dmaCode );
+        dmaConfig.DmaChannel      = (dma_ChannelId_t)I2C_DMA_BIT_MASK_DECODE_STREAM( dmaCode );
         dmaConfig.PeripheralReqId = channelSel;
         dmaConfig.Priority        = (dma_Priority_t)dmaPrio;
 

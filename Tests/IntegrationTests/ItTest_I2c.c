@@ -78,8 +78,8 @@ static void It_I2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
     #define IT_I2C_SLAVE_NVIC_ER            ( NVIC_PERIPH_IRQ_I2C2_ER )
 
     /** DMA1 streams of I2C1 (DMA1 request mapping, channel 1) */
-    #define IT_I2C_DMA_TX_STREAM            ( I2C_DMA_CHANNEL_6 )
-    #define IT_I2C_DMA_RX_STREAM            ( I2C_DMA_CHANNEL_0 )
+    #define IT_I2C_DMA_TX                   ( I2C_TX_DMA_I2C1_DMA1_STREAM6 )
+    #define IT_I2C_DMA_RX                   ( I2C_RX_DMA_I2C1_DMA1_STREAM0 )
 
 #elif defined(IT_BOARD_STM32F405xG) || \
       defined(IT_BOARD_STM32F407xG) || \
@@ -100,8 +100,8 @@ static void It_I2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
     #define IT_I2C_SLAVE_NVIC_ER            ( NVIC_PERIPH_IRQ_I2C2_ER )
 
     /** DMA1 streams of I2C1 (DMA1 request mapping, channel 1) */
-    #define IT_I2C_DMA_TX_STREAM            ( I2C_DMA_CHANNEL_6 )
-    #define IT_I2C_DMA_RX_STREAM            ( I2C_DMA_CHANNEL_0 )
+    #define IT_I2C_DMA_TX                   ( I2C_TX_DMA_I2C1_DMA1_STREAM6 )
+    #define IT_I2C_DMA_RX                   ( I2C_RX_DMA_I2C1_DMA1_STREAM0 )
 
 #else
     #error "Board of I2c integration tests is not defined (INTEGRATION_TEST_BOARD)."
@@ -609,11 +609,9 @@ static void It_I2c_Init( i2c_XferMode_t xferMode, i2c_FreqHz_t busFreq )
     i2c_Config_t config;
 
     itI2c_DataConfig.XferMode             = xferMode;
-    itI2c_DataConfig.TxDmaPeriphId        = I2C_DMA_PERIPH_1;
-    itI2c_DataConfig.TxDmaChannelId       = IT_I2C_DMA_TX_STREAM;
+    itI2c_DataConfig.TxDma                = IT_I2C_DMA_TX;
     itI2c_DataConfig.TxDmaPriority        = I2C_DMA_PRIORITY_LOW;
-    itI2c_DataConfig.RxDmaPeriphId        = I2C_DMA_PERIPH_1;
-    itI2c_DataConfig.RxDmaChannelId       = IT_I2C_DMA_RX_STREAM;
+    itI2c_DataConfig.RxDma                = IT_I2C_DMA_RX;
     itI2c_DataConfig.RxDmaPriority        = I2C_DMA_PRIORITY_LOW;
     itI2c_DataConfig.IrqPriority          = IT_I2C_IRQ_PRIO;
     itI2c_DataConfig.XferCompleteCallback = It_I2c_XferCompleteCallback;

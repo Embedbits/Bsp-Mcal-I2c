@@ -63,13 +63,25 @@ extern "C" {
 /** Alternate function identification bit offset in encoded pin value */
 #define I2C_BIT_MASK_AF_BIT_OFFSET          ( 0u )
 
-/** Mask of one field (5 bits) in encoded pin value */
+/** Mask of one field (5 bits) in encoded pin / DMA stream value */
 #define I2C_BIT_MASK_FIELD                  ( 0x1Fu )
 
+/** I2C peripheral identification bit offset in encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_PERIPH_BIT_OFFSET  ( 15u )
+
+/** DMA peripheral identification bit offset in encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_DMA_BIT_OFFSET     ( 10u )
+
+/** Stream identification bit offset in encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_STREAM_BIT_OFFSET  ( 5u )
+
+/** Channel selection (CHSEL) bit offset in encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_CHSEL_BIT_OFFSET   ( 0u )
+
 /**
- * Alternate function and DMA request map of the device family (source: embassy stm32-data of
- * all STM32F4 devices). Devices of one group share an identical I2C pin / alternate function
- * and DMA request map (pins missing in small packages are not distinguished).
+ * DMA request map of the device family (source: embassy stm32-data of all STM32F4 devices).
+ * Devices of one group share an identical I2C DMA request map. The pin tables are guarded by
+ * the device line (STM32CubeMX GPIO database), not by these groups.
  */
 #if defined(STM32F405xx) || defined(STM32F415xx)
 #define I2C_AF_MAP_F405_F415
@@ -85,7 +97,7 @@ extern "C" {
 #elif defined(STM32F446xx)
 #define I2C_AF_MAP_F446
 #else
-#error "I2c: I2C pin / alternate function map of the selected device is not defined"
+#error "I2c: I2C DMA request map of the selected device is not defined"
 #endif
 
 /* ========================== EXPORTED MACROS =============================== */
@@ -107,6 +119,34 @@ extern "C" {
 
 /** Extract alternate function ID from encoded pin value */
 #define I2C_BIT_MASK_DECODE_AF( CODED_VAL )         ( ( (CODED_VAL) >> I2C_BIT_MASK_AF_BIT_OFFSET ) & I2C_BIT_MASK_FIELD )
+
+/**
+ * \brief Encodes DMA stream (I2C peripheral, DMA peripheral, stream, channel selection) into single
+ *        value of \ref i2c_DmaCode_t
+ *
+ * The macro defines the values of the DMA stream lists \ref i2c_TxDma_t and \ref i2c_RxDma_t, e.g. the
+ * I2C1 transmit request on DMA1 stream 6 (channel selection 1) is \ref I2C_TX_DMA_I2C1_DMA1_STREAM6:
+ * I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_6, 1u )
+ */
+#define I2C_DMA_ENCODE( PERIPH_ID, DMA_ID, STREAM_ID, CHSEL )   ( (i2c_DmaCode_t)( ( (uint32_t)(PERIPH_ID) << I2C_DMA_BIT_MASK_PERIPH_BIT_OFFSET ) | \
+                                                                                   ( (uint32_t)(DMA_ID)    << I2C_DMA_BIT_MASK_DMA_BIT_OFFSET    ) | \
+                                                                                   ( (uint32_t)(STREAM_ID) << I2C_DMA_BIT_MASK_STREAM_BIT_OFFSET ) | \
+                                                                                   ( (uint32_t)(CHSEL)     << I2C_DMA_BIT_MASK_CHSEL_BIT_OFFSET  )   ) )
+
+/** Stream is not configured by the module (value of the *_DMA_UNUSED items of the DMA stream lists) */
+#define I2C_DMA_CODE_UNUSED                 I2C_DMA_ENCODE( I2C_PERIPH_CNT, I2C_DMA_PERIPH_CNT, I2C_DMA_CHANNEL_CNT, 0u )
+
+/** Extract I2C peripheral ID from encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_DECODE_PERIPH( CODED_VAL ) ( ( (CODED_VAL) >> I2C_DMA_BIT_MASK_PERIPH_BIT_OFFSET ) & I2C_BIT_MASK_FIELD )
+
+/** Extract DMA peripheral ID from encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_DECODE_DMA( CODED_VAL )    ( ( (CODED_VAL) >> I2C_DMA_BIT_MASK_DMA_BIT_OFFSET ) & I2C_BIT_MASK_FIELD )
+
+/** Extract stream ID from encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_DECODE_STREAM( CODED_VAL ) ( ( (CODED_VAL) >> I2C_DMA_BIT_MASK_STREAM_BIT_OFFSET ) & I2C_BIT_MASK_FIELD )
+
+/** Extract channel selection (CHSEL) from encoded DMA stream value */
+#define I2C_DMA_BIT_MASK_DECODE_CHSEL( CODED_VAL )  ( ( (CODED_VAL) >> I2C_DMA_BIT_MASK_CHSEL_BIT_OFFSET ) & I2C_BIT_MASK_FIELD )
 
 /* ============================== TYPEDEFS ================================== */
 
@@ -169,6 +209,9 @@ typedef uint16_t i2c_DataCnt_t;
 
 /** \brief Interrupt priority type definition */
 typedef uint32_t i2c_IrqPrio_t;
+
+/** \brief Encoded DMA stream (value of \ref i2c_TxDma_t or \ref i2c_RxDma_t) */
+typedef uint32_t i2c_DmaCode_t;
 
 
 /** \brief I2C peripheral identification */
@@ -258,35 +301,43 @@ typedef enum
 /** \brief List of SCL pins available for I2C peripherals (source: embassy stm32-data) */
 typedef enum
 {
-#ifdef I2C1
-#ifdef GPIOB
     I2C_SCL_PIN_I2C1_PB6       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_6  , GPIO_ALT_FUNC_4   ), /**< I2C1 SCL pin connected to PB6 */
     I2C_SCL_PIN_I2C1_PB8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C1 SCL pin connected to PB8 */
-#endif
-#endif /* I2C1 */
 
-#ifdef I2C2
-#ifdef GPIOB
     I2C_SCL_PIN_I2C2_PB10      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_10 , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PB10 */
-#endif
-#ifdef GPIOF
+#if !defined(STM32F410Cx) && \
+    !defined(STM32F410Rx) && \
+    !defined(STM32F410Tx) && \
+    !defined(STM32F412Cx) && \
+    !defined(STM32F412Rx) && \
+    !defined(STM32F412Vx) && \
+    !defined(STM32F401xC) && \
+    !defined(STM32F401xE) && \
+    !defined(STM32F411xE)
     I2C_SCL_PIN_I2C2_PF1       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_F  , GPIO_PIN_ID_1  , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PF1 */
 #endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_F407_F479)
+#if defined(STM32F407xx) || \
+    defined(STM32F417xx) || \
+    defined(STM32F427xx) || \
+    defined(STM32F429xx) || \
+    defined(STM32F437xx) || \
+    defined(STM32F439xx) || \
+    defined(STM32F469xx) || \
+    defined(STM32F479xx)
     I2C_SCL_PIN_I2C2_PH4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_H  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_4   ), /**< I2C2 SCL pin connected to PH4 */
 #endif
-#endif
-#endif /* I2C2 */
 
-#ifdef I2C3
-#ifdef GPIOA
+#if defined(I2C3)
     I2C_SCL_PIN_I2C3_PA8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_A  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PA8 */
-#endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_F407_F479)
+#if defined(STM32F407xx) || \
+    defined(STM32F417xx) || \
+    defined(STM32F427xx) || \
+    defined(STM32F429xx) || \
+    defined(STM32F437xx) || \
+    defined(STM32F439xx) || \
+    defined(STM32F469xx) || \
+    defined(STM32F479xx)
     I2C_SCL_PIN_I2C3_PH7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_H  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C3 SCL pin connected to PH7 */
-#endif
 #endif
 #endif /* I2C3 */
 
@@ -297,58 +348,105 @@ typedef enum
 /** \brief List of SDA pins available for I2C peripherals (source: embassy stm32-data) */
 typedef enum
 {
-#ifdef I2C1
-#ifdef GPIOB
     I2C_SDA_PIN_I2C1_PB7       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_7  , GPIO_ALT_FUNC_4   ), /**< I2C1 SDA pin connected to PB7 */
+#if !defined(STM32F410Tx)
     I2C_SDA_PIN_I2C1_PB9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_1 , GPIO_PORT_B  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_4   ), /**< I2C1 SDA pin connected to PB9 */
 #endif
-#endif /* I2C1 */
 
-#ifdef I2C2
-#ifdef GPIOB
-#if defined(I2C_AF_MAP_F401) || defined(I2C_AF_MAP_F410_F423)
-    I2C_SDA_PIN_I2C2_PB3       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_3  , GPIO_ALT_FUNC_9   ), /**< I2C2 SDA pin connected to PB3 */
-#elif defined(I2C_AF_MAP_F446)
+#if defined(STM32F446xx)
     I2C_SDA_PIN_I2C2_PB3       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_3  , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PB3 */
 #endif
-#if defined(I2C_AF_MAP_F410_F423)
+#if !defined(STM32F405xx) && \
+    !defined(STM32F407xx) && \
+    !defined(STM32F415xx) && \
+    !defined(STM32F417xx) && \
+    !defined(STM32F427xx) && \
+    !defined(STM32F429xx) && \
+    !defined(STM32F437xx) && \
+    !defined(STM32F439xx) && \
+    !defined(STM32F446xx) && \
+    !defined(STM32F469xx) && \
+    !defined(STM32F479xx)
+    I2C_SDA_PIN_I2C2_PB3       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_3  , GPIO_ALT_FUNC_9   ), /**< I2C2 SDA pin connected to PB3 */
+#endif
+#if defined(STM32F410Cx) || \
+    defined(STM32F410Rx) || \
+    defined(STM32F412Cx) || \
+    defined(STM32F412Rx) || \
+    defined(STM32F412Vx) || \
+    defined(STM32F412Zx) || \
+    defined(STM32F411xE) || \
+    defined(STM32F413xx) || \
+    defined(STM32F423xx)
     I2C_SDA_PIN_I2C2_PB9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_9   ), /**< I2C2 SDA pin connected to PB9 */
 #endif
+#if !defined(STM32F410Cx) && \
+    !defined(STM32F410Tx) && \
+    !defined(STM32F412Cx) && \
+    !defined(STM32F412Rx)
     I2C_SDA_PIN_I2C2_PB11      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_B  , GPIO_PIN_ID_11 , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PB11 */
 #endif
-#ifdef GPIOC
-#if defined(I2C_AF_MAP_F446)
+#if defined(STM32F446xx)
     I2C_SDA_PIN_I2C2_PC12      = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_C  , GPIO_PIN_ID_12 , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PC12 */
 #endif
-#endif
-#ifdef GPIOF
+#if !defined(STM32F410Cx) && \
+    !defined(STM32F410Rx) && \
+    !defined(STM32F410Tx) && \
+    !defined(STM32F412Cx) && \
+    !defined(STM32F412Rx) && \
+    !defined(STM32F412Vx) && \
+    !defined(STM32F401xC) && \
+    !defined(STM32F401xE) && \
+    !defined(STM32F411xE)
     I2C_SDA_PIN_I2C2_PF0       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_F  , GPIO_PIN_ID_0  , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PF0 */
 #endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_F407_F479)
+#if defined(STM32F407xx) || \
+    defined(STM32F417xx) || \
+    defined(STM32F427xx) || \
+    defined(STM32F429xx) || \
+    defined(STM32F437xx) || \
+    defined(STM32F439xx) || \
+    defined(STM32F469xx) || \
+    defined(STM32F479xx)
     I2C_SDA_PIN_I2C2_PH5       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_2 , GPIO_PORT_H  , GPIO_PIN_ID_5  , GPIO_ALT_FUNC_4   ), /**< I2C2 SDA pin connected to PH5 */
 #endif
-#endif
-#endif /* I2C2 */
 
-#ifdef I2C3
-#ifdef GPIOB
-#if defined(I2C_AF_MAP_F401) || defined(I2C_AF_MAP_F410_F423)
-    I2C_SDA_PIN_I2C3_PB4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_B  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_9   ), /**< I2C3 SDA pin connected to PB4 */
-#elif defined(I2C_AF_MAP_F446)
+#if defined(I2C3)
+#if defined(STM32F446xx)
     I2C_SDA_PIN_I2C3_PB4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_B  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PB4 */
 #endif
-#if defined(I2C_AF_MAP_F410_F423)
+#if defined(STM32F412Cx) || \
+    defined(STM32F412Rx) || \
+    defined(STM32F412Vx) || \
+    defined(STM32F412Zx) || \
+    defined(STM32F401xC) || \
+    defined(STM32F401xE) || \
+    defined(STM32F411xE) || \
+    defined(STM32F413xx) || \
+    defined(STM32F423xx)
+    I2C_SDA_PIN_I2C3_PB4       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_B  , GPIO_PIN_ID_4  , GPIO_ALT_FUNC_9   ), /**< I2C3 SDA pin connected to PB4 */
+#endif
+#if defined(STM32F412Cx) || \
+    defined(STM32F412Rx) || \
+    defined(STM32F412Vx) || \
+    defined(STM32F412Zx) || \
+    defined(STM32F411xE) || \
+    defined(STM32F413xx) || \
+    defined(STM32F423xx)
     I2C_SDA_PIN_I2C3_PB8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_B  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_9   ), /**< I2C3 SDA pin connected to PB8 */
 #endif
-#endif
-#ifdef GPIOC
+#if !defined(STM32F412Cx)
     I2C_SDA_PIN_I2C3_PC9       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_C  , GPIO_PIN_ID_9  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PC9 */
 #endif
-#ifdef GPIOH
-#if defined(I2C_AF_MAP_F407_F479)
+#if defined(STM32F407xx) || \
+    defined(STM32F417xx) || \
+    defined(STM32F427xx) || \
+    defined(STM32F429xx) || \
+    defined(STM32F437xx) || \
+    defined(STM32F439xx) || \
+    defined(STM32F469xx) || \
+    defined(STM32F479xx)
     I2C_SDA_PIN_I2C3_PH8       = I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3 , GPIO_PORT_H  , GPIO_PIN_ID_8  , GPIO_ALT_FUNC_4   ), /**< I2C3 SDA pin connected to PH8 */
-#endif
 #endif
 #endif /* I2C3 */
 
@@ -368,8 +466,8 @@ typedef enum
  * \brief Enumeration of DMA streams (channel of the interface = stream of STM32F4 DMA)
  *
  * The stream must be connected to the I2C request of the transfer direction (RM, DMA1 request
- * mapping), e.g. STM32F407: I2C1 RX streams 0 / 5, I2C1 TX streams 6 / 7. The channel selection
- * of the stream is derived by the module.
+ * mapping), e.g. STM32F407: I2C1 RX streams 0 / 5, I2C1 TX streams 6 / 7. The streams usable by
+ * the I2C peripherals are given by the lists \ref i2c_TxDma_t and \ref i2c_RxDma_t.
  */
 typedef enum
 {
@@ -383,6 +481,76 @@ typedef enum
     I2C_DMA_CHANNEL_7  = DMA_STREAM_7,  /**< DMA stream 7                   */
     I2C_DMA_CHANNEL_CNT                 /**< Count of available DMA streams */
 }   i2c_DmaChannelId_t;
+
+
+/**
+ * \brief List of DMA streams able to serve the I2C TX request of the peripherals (STM32CubeMX database / reference
+ *        manual DMA request mapping, the channel selection of the stream is part of the value, streams
+ *        existing only on some STM32F4 lines are guarded by the CMSIS device line)
+ */
+typedef enum
+{
+#if defined(STM32F410Cx) || \
+    defined(STM32F410Rx) || \
+    defined(STM32F410Tx) || \
+    defined(STM32F412Cx) || \
+    defined(STM32F412Rx) || \
+    defined(STM32F412Vx) || \
+    defined(STM32F412Zx) || \
+    defined(STM32F411xE) || \
+    defined(STM32F413xx) || \
+    defined(STM32F423xx)
+    I2C_TX_DMA_I2C1_DMA1_STREAM1       = I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_1, 0u ), /**< I2C1 TX request on DMA1 stream 1 (channel selection 0) */
+#endif
+    I2C_TX_DMA_I2C1_DMA1_STREAM6       = I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_6, 1u ), /**< I2C1 TX request on DMA1 stream 6 (channel selection 1) */
+    I2C_TX_DMA_I2C1_DMA1_STREAM7       = I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_7, 1u ), /**< I2C1 TX request on DMA1 stream 7 (channel selection 1) */
+    I2C_TX_DMA_I2C2_DMA1_STREAM7       = I2C_DMA_ENCODE( I2C_PERIPH_2, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_7, 7u ), /**< I2C2 TX request on DMA1 stream 7 (channel selection 7) */
+#if defined(I2C3)
+    I2C_TX_DMA_I2C3_DMA1_STREAM4       = I2C_DMA_ENCODE( I2C_PERIPH_3, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_4, 3u ), /**< I2C3 TX request on DMA1 stream 4 (channel selection 3) */
+#endif
+#if defined(STM32F412Cx) || \
+    defined(STM32F412Rx) || \
+    defined(STM32F412Vx) || \
+    defined(STM32F412Zx) || \
+    defined(STM32F401xC) || \
+    defined(STM32F401xE) || \
+    defined(STM32F411xE) || \
+    defined(STM32F413xx) || \
+    defined(STM32F423xx)
+    I2C_TX_DMA_I2C3_DMA1_STREAM5       = I2C_DMA_ENCODE( I2C_PERIPH_3, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_5, 6u ), /**< I2C3 TX request on DMA1 stream 5 (channel selection 6) */
+#endif
+    I2C_TX_DMA_UNUSED                  = I2C_DMA_CODE_UNUSED  /**< DMA stream is not selected */
+}   i2c_TxDma_t;
+
+
+/**
+ * \brief List of DMA streams able to serve the I2C RX request of the peripherals (STM32CubeMX database / reference
+ *        manual DMA request mapping, the channel selection of the stream is part of the value, streams
+ *        existing only on some STM32F4 lines are guarded by the CMSIS device line)
+ */
+typedef enum
+{
+    I2C_RX_DMA_I2C1_DMA1_STREAM0       = I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_0, 1u ), /**< I2C1 RX request on DMA1 stream 0 (channel selection 1) */
+    I2C_RX_DMA_I2C1_DMA1_STREAM5       = I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_5, 1u ), /**< I2C1 RX request on DMA1 stream 5 (channel selection 1) */
+    I2C_RX_DMA_I2C2_DMA1_STREAM2       = I2C_DMA_ENCODE( I2C_PERIPH_2, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_2, 7u ), /**< I2C2 RX request on DMA1 stream 2 (channel selection 7) */
+    I2C_RX_DMA_I2C2_DMA1_STREAM3       = I2C_DMA_ENCODE( I2C_PERIPH_2, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_3, 7u ), /**< I2C2 RX request on DMA1 stream 3 (channel selection 7) */
+#if defined(STM32F412Cx) || \
+    defined(STM32F412Rx) || \
+    defined(STM32F412Vx) || \
+    defined(STM32F412Zx) || \
+    defined(STM32F401xC) || \
+    defined(STM32F401xE) || \
+    defined(STM32F411xE) || \
+    defined(STM32F413xx) || \
+    defined(STM32F423xx) || \
+    defined(STM32F446xx)
+    I2C_RX_DMA_I2C3_DMA1_STREAM1       = I2C_DMA_ENCODE( I2C_PERIPH_3, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_1, 1u ), /**< I2C3 RX request on DMA1 stream 1 (channel selection 1) */
+#endif
+#if defined(I2C3)
+    I2C_RX_DMA_I2C3_DMA1_STREAM2       = I2C_DMA_ENCODE( I2C_PERIPH_3, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_2, 3u ), /**< I2C3 RX request on DMA1 stream 2 (channel selection 3) */
+#endif
+    I2C_RX_DMA_UNUSED                  = I2C_DMA_CODE_UNUSED  /**< DMA stream is not selected */
+}   i2c_RxDma_t;
 
 
 /** Channel priority options enumeration */
@@ -454,19 +622,17 @@ typedef void ( i2c_XferErrCallback_t )( i2c_XferErrorId_t errorId );
  *                         requested
  * - ErrorCallback:        transfer was terminated by an error (\ref i2c_XferErrorId_t)
  *
- * Unused callback shall be set to I2C_NULL_PTR. DMA identifications / priorities are used only
- * in I2C_XFER_MODE_DMA (transmit and receive stream must differ and must be connected to the
- * I2C request of the direction), IrqPriority is used in DMA and ISR mode (event and error
- * interrupt).
+ * Unused callback shall be set to I2C_NULL_PTR. DMA streams / priorities are used only in
+ * I2C_XFER_MODE_DMA (TxDma / RxDma are items of the lists \ref i2c_TxDma_t / \ref i2c_RxDma_t of the
+ * configured I2C peripheral, I2C_TX_DMA_UNUSED / I2C_RX_DMA_UNUSED in other modes), IrqPriority is
+ * used in DMA and ISR mode (event and error interrupt).
  */
 typedef struct
 {
     i2c_XferMode_t          XferMode;             /**< Data transfer mode (NONE / DMA / ISR / POLL)     */
-    i2c_DmaPeriphId_t       TxDmaPeriphId;        /**< DMA peripheral (transmission in DMA mode)        */
-    i2c_DmaChannelId_t      TxDmaChannelId;       /**< DMA stream (transmission in DMA mode)            */
+    i2c_TxDma_t             TxDma;                /**< DMA stream (transmission in DMA mode)            */
     i2c_DmaPriority_t       TxDmaPriority;        /**< DMA stream priority (transmission in DMA mode)   */
-    i2c_DmaPeriphId_t       RxDmaPeriphId;        /**< DMA peripheral (reception in DMA mode)           */
-    i2c_DmaChannelId_t      RxDmaChannelId;       /**< DMA stream (reception in DMA mode)               */
+    i2c_RxDma_t             RxDma;                /**< DMA stream (reception in DMA mode)               */
     i2c_DmaPriority_t       RxDmaPriority;        /**< DMA stream priority (reception in DMA mode)      */
     i2c_IrqPrio_t           IrqPriority;          /**< I2C interrupts priority (DMA / ISR mode)         */
     i2c_XferCallback_t     *XferCompleteCallback; /**< Transfer complete. I2C_NULL_PTR if not used.     */

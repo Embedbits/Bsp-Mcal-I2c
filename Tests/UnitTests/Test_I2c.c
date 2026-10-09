@@ -81,9 +81,13 @@ static void                 Ut_I2c_ErrorCallback        ( i2c_XferErrorId_t erro
 #define UT_I2C_HEADER10_READ                ( 0xF5u )
 #define UT_I2C_ADDR10_LOW                   ( 0xA5u )
 
-/** DMA streams of I2C1 used by tests (TX stream 6, RX stream 0, channel 1) */
-#define UT_I2C_DMA_TX_STREAM                ( I2C_DMA_CHANNEL_6 )
-#define UT_I2C_DMA_RX_STREAM                ( I2C_DMA_CHANNEL_0 )
+/** DMA streams of I2C1 used by tests (TX stream 6, RX stream 0, channel selection 1) */
+#define UT_I2C_DMA_TX                       ( I2C_TX_DMA_I2C1_DMA1_STREAM6 )
+#define UT_I2C_DMA_RX                       ( I2C_RX_DMA_I2C1_DMA1_STREAM0 )
+
+/** Encoded DMA stream from the peripheral, DMA peripheral index, stream number and channel selection number
+ *  (bit-fields written independently of I2C_DMA_ENCODE) */
+#define UT_I2C_DMA_CODE( PERIPH, DMA, STREAM, CHSEL )   ( ( (PERIPH) << 15u ) | ( (DMA) << 10u ) | ( (STREAM) << 5u ) | (CHSEL) )
 
 /** Count of transmit / receive buffer bytes */
 #define UT_I2C_BUF_SIZE                     ( 8u )
@@ -379,10 +383,11 @@ void Ut_I2c_Init_ClockOutOfRange_ReturnsErrorPeripheralNotEnabled( void )
 /**
  * \brief   I2c_Init() configures SCL / SDA pins as open-drain alternate function.
  *
- * \details Initializes I2C1 on PB6 (SCL) / PB9 (SDA) with internal pull-up.
+ * \details Initializes I2C1 on PB6 (SCL) / PB7 (SDA) with internal pull-up (both pins exist
+ *          on every device line).
  *
  * \par Expected results
- * - Gpio_Init() called twice: PB6 and PB9, alternate function 4, open-drain,
+ * - Gpio_Init() called twice: PB6 and PB7, alternate function 4, open-drain,
  *   pull-up, active level high.
  */
 void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
@@ -390,7 +395,7 @@ void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
     i2c_Config_t config = Ut_I2c_Get_Config();
 
     config.SclPin  = I2C_SCL_PIN_I2C1_PB6;
-    config.SdaPin  = I2C_SDA_PIN_I2C1_PB9;
+    config.SdaPin  = I2C_SDA_PIN_I2C1_PB7;
     config.PinPull = I2C_PIN_PULL_UP;
 
     Ut_I2c_Ignore_PeriphMocks();
@@ -403,7 +408,7 @@ void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
     TEST_ASSERT_EQUAL( GPIO_PORT_B,               utI2c_GpioConfig[ 0u ].PortId );
     TEST_ASSERT_EQUAL( GPIO_PIN_ID_6,             utI2c_GpioConfig[ 0u ].PinId );
     TEST_ASSERT_EQUAL( GPIO_PORT_B,               utI2c_GpioConfig[ 1u ].PortId );
-    TEST_ASSERT_EQUAL( GPIO_PIN_ID_9,             utI2c_GpioConfig[ 1u ].PinId );
+    TEST_ASSERT_EQUAL( GPIO_PIN_ID_7,             utI2c_GpioConfig[ 1u ].PinId );
 
     for( uint32_t pinIdx = 0u; 2u > pinIdx; pinIdx++ )
     {
@@ -911,11 +916,11 @@ void Ut_I2c_Set_DataConfig_InvalidConfig_ReturnsErrorWithoutAccess( void )
 
 
 /**
- * \brief   DMA data configuration rejects streams not connected to the I2C request.
+ * \brief   DMA data configuration rejects streams out of the DMA stream lists.
  *
- * \details DMA mode with: TX stream 0 (I2C1 RX request), RX stream 6 (I2C1 TX
- *          request), stream 3 (no I2C1 request), TX = RX stream, priority out of
- *          range, invalid DMA peripheral.
+ * \details DMA mode with: unused streams, the RX stream item (I2C1 RX request) as TX stream, the
+ *          TX stream item (I2C1 TX request) as RX stream, stream 3 (no I2C1 request), the I2C2
+ *          stream items, DMA peripheral and stream out of range, priority out of range.
  *
  * \par Expected results
  * - I2C_REQUEST_ERROR in all cases, DMA / NVIC not called.
@@ -924,19 +929,45 @@ void Ut_I2c_Set_DataConfig_DmaInvalidStreams_ReturnsErrorWithoutAccess( void )
 {
     i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
 
-    dataConfig.TxDmaChannelId = I2C_DMA_CHANNEL_0;
+    dataConfig.TxDma = I2C_TX_DMA_UNUSED;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
-    dataConfig.RxDmaChannelId = I2C_DMA_CHANNEL_6;
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.RxDma = I2C_RX_DMA_UNUSED;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
-    dataConfig.RxDmaChannelId = I2C_DMA_CHANNEL_3;
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.TxDma = (i2c_TxDma_t)I2C_RX_DMA_I2C1_DMA1_STREAM0;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
-    dataConfig.RxDmaChannelId = dataConfig.TxDmaChannelId;
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.RxDma = (i2c_RxDma_t)I2C_TX_DMA_I2C1_DMA1_STREAM6;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.RxDma = (i2c_RxDma_t)I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_3, 1u );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+
+#if defined(I2C2)
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.TxDma = I2C_TX_DMA_I2C2_DMA1_STREAM7;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.RxDma = I2C_RX_DMA_I2C2_DMA1_STREAM2;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+#endif /* I2C2 */
+
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.TxDma = (i2c_TxDma_t)I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_CNT, 1u );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.RxDma = (i2c_RxDma_t)I2C_DMA_ENCODE( I2C_PERIPH_1, I2C_DMA_PERIPH_CNT, I2C_DMA_CHANNEL_0, 1u );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+
+    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig.RxDma = (i2c_RxDma_t)I2C_DMA_ENCODE( I2C_PERIPH_CNT, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_0, 1u );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
     dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
@@ -944,7 +975,7 @@ void Ut_I2c_Set_DataConfig_DmaInvalidStreams_ReturnsErrorWithoutAccess( void )
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
     dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
-    dataConfig.RxDmaPeriphId = I2C_DMA_PERIPH_CNT;
+    dataConfig.RxDmaPriority = (i2c_DmaPriority_t)DMA_PRIORITY_CNT;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 }
 
@@ -2006,44 +2037,67 @@ void Ut_I2c_Dma_RxTransferError_TransferAborted( void )
 
 
 /**
- * \brief   I2C2 and I2C3 use their own ISR and DMA callbacks.
+ * \brief   Every I2C peripheral uses its own ISR and DMA callbacks on every stream pair.
  *
- * \details I2C2 in DMA mode (TX stream 7, RX stream 2, channel 7) and I2C3 in DMA mode
- *          (TX stream 4, RX stream 2, channel 3), no transfer is running. Captured ISR
- *          is called without flags, DMA callbacks (TX error, RX error, RX complete) of
- *          both streams are called. MCUs without I2C2 / I2C3: test ignored.
+ * \details Every item of the DMA stream lists of every I2C peripheral of the MCU (DMA1 request
+ *          table of the device line), items paired by the I2C peripheral, in DMA mode, no
+ *          transfer is running. Captured ISR is called without flags, DMA callbacks (TX error,
+ *          RX error, RX complete) of both streams are called.
  *
  * \par Expected results
+ * - Streams of the list items are accepted and configured with the channel selections of the
+ *   request table, channel selection stored in the items equals the request table.
  * - ISR without transfer: no callback, CR1 not changed.
  * - TX / RX error: error callback with I2C_XFER_ERROR_DMA_TRANSFER (transfer not
  *   running - only reported), RX complete: no callback.
  * - I2c_Deinit(): I2C_REQUEST_OK, both streams released.
  */
-void Ut_I2c_Dma_I2c2I2c3Callbacks_OwnPeripheralReported( void )
+void Ut_I2c_Dma_AllStreams_OwnPeripheralReported( void )
 {
-#if defined(I2C2) && defined(I2C3)
     i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     const struct
     {
         i2c_PeriphId_t       PeriphId;
         I2C_TypeDef *        PeriphReg;
+        i2c_TxDma_t          TxDma;
+        i2c_RxDma_t          RxDma;
         i2c_DmaChannelId_t   TxStream;
         i2c_DmaChannelId_t   RxStream;
-        dma_PeriphReqId_t    ChannelSel;
+        dma_PeriphReqId_t    TxSel;
+        dma_PeriphReqId_t    RxSel;
     }   periphLut[] =
     {
-        { I2C_PERIPH_2, I2C2, I2C_DMA_CHANNEL_7, I2C_DMA_CHANNEL_2, DMA_REQ_CHANNEL_7 },
-        { I2C_PERIPH_3, I2C3, I2C_DMA_CHANNEL_4, I2C_DMA_CHANNEL_2, DMA_REQ_CHANNEL_3 },
+        { I2C_PERIPH_1, I2C1, I2C_TX_DMA_I2C1_DMA1_STREAM6, I2C_RX_DMA_I2C1_DMA1_STREAM0, I2C_DMA_CHANNEL_6, I2C_DMA_CHANNEL_0, DMA_REQ_CHANNEL_1, DMA_REQ_CHANNEL_1 },
+        { I2C_PERIPH_1, I2C1, I2C_TX_DMA_I2C1_DMA1_STREAM7, I2C_RX_DMA_I2C1_DMA1_STREAM5, I2C_DMA_CHANNEL_7, I2C_DMA_CHANNEL_5, DMA_REQ_CHANNEL_1, DMA_REQ_CHANNEL_1 },
+#if defined(I2C_AF_MAP_F410_F423)
+        { I2C_PERIPH_1, I2C1, I2C_TX_DMA_I2C1_DMA1_STREAM1, I2C_RX_DMA_I2C1_DMA1_STREAM0, I2C_DMA_CHANNEL_1, I2C_DMA_CHANNEL_0, DMA_REQ_CHANNEL_0, DMA_REQ_CHANNEL_1 },
+#endif /* I2C_AF_MAP_F410_F423 */
+#ifdef I2C2
+        { I2C_PERIPH_2, I2C2, I2C_TX_DMA_I2C2_DMA1_STREAM7, I2C_RX_DMA_I2C2_DMA1_STREAM2, I2C_DMA_CHANNEL_7, I2C_DMA_CHANNEL_2, DMA_REQ_CHANNEL_7, DMA_REQ_CHANNEL_7 },
+        { I2C_PERIPH_2, I2C2, I2C_TX_DMA_I2C2_DMA1_STREAM7, I2C_RX_DMA_I2C2_DMA1_STREAM3, I2C_DMA_CHANNEL_7, I2C_DMA_CHANNEL_3, DMA_REQ_CHANNEL_7, DMA_REQ_CHANNEL_7 },
+#endif /* I2C2 */
+#ifdef I2C3
+        { I2C_PERIPH_3, I2C3, I2C_TX_DMA_I2C3_DMA1_STREAM4, I2C_RX_DMA_I2C3_DMA1_STREAM2, I2C_DMA_CHANNEL_4, I2C_DMA_CHANNEL_2, DMA_REQ_CHANNEL_3, DMA_REQ_CHANNEL_3 },
+#if defined(I2C_AF_MAP_F401)      || \
+    defined(I2C_AF_MAP_F410_F423) || \
+    defined(I2C_AF_MAP_F446)
+        { I2C_PERIPH_3, I2C3, I2C_TX_DMA_I2C3_DMA1_STREAM4, I2C_RX_DMA_I2C3_DMA1_STREAM1, I2C_DMA_CHANNEL_4, I2C_DMA_CHANNEL_1, DMA_REQ_CHANNEL_3, DMA_REQ_CHANNEL_1 },
+#endif /* I2C_AF_MAP_F401 OR I2C_AF_MAP_F410_F423 OR I2C_AF_MAP_F446 */
+#if defined(I2C_AF_MAP_F401)      || \
+    defined(I2C_AF_MAP_F410_F423)
+        { I2C_PERIPH_3, I2C3, I2C_TX_DMA_I2C3_DMA1_STREAM5, I2C_RX_DMA_I2C3_DMA1_STREAM2, I2C_DMA_CHANNEL_5, I2C_DMA_CHANNEL_2, DMA_REQ_CHANNEL_6, DMA_REQ_CHANNEL_3 },
+#endif /* I2C_AF_MAP_F401 OR I2C_AF_MAP_F410_F423 */
+#endif /* I2C3 */
     };
 
-    for( uint32_t idx = 0u; 2u > idx; idx++ )
+    for( uint32_t idx = 0u; ( sizeof( periphLut ) / sizeof( periphLut[ 0u ] ) ) > idx; idx++ )
     {
         i2c_Config_t config = Ut_I2c_Get_Config();
 
-        dataConfig.TxDmaChannelId = periphLut[ idx ].TxStream;
-        dataConfig.RxDmaChannelId = periphLut[ idx ].RxStream;
-        config.PeriphId           = periphLut[ idx ].PeriphId;
-        config.DataConfig         = &dataConfig;
+        dataConfig.TxDma  = periphLut[ idx ].TxDma;
+        dataConfig.RxDma  = periphLut[ idx ].RxDma;
+        config.PeriphId   = periphLut[ idx ].PeriphId;
+        config.DataConfig = &dataConfig;
 
         Ut_I2c_Reset_Mocks();
         Ut_I2c_Ignore_PeriphMocks();
@@ -2054,9 +2108,17 @@ void Ut_I2c_Dma_I2c2I2c3Callbacks_OwnPeripheralReported( void )
 
         TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
         TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaInitCnt );
-        TEST_ASSERT_EQUAL( periphLut[ idx ].ChannelSel, utI2c_DmaConfig[ 0u ].PeripheralReqId );
-        TEST_ASSERT_EQUAL( periphLut[ idx ].ChannelSel, utI2c_DmaConfig[ 1u ].PeripheralReqId );
+        TEST_ASSERT_EQUAL( DMA_PERIPH_1,                                utI2c_DmaConfig[ 0u ].DmaPeriphId );
+        TEST_ASSERT_EQUAL( DMA_PERIPH_1,                                utI2c_DmaConfig[ 1u ].DmaPeriphId );
+        TEST_ASSERT_EQUAL( (dma_ChannelId_t)periphLut[ idx ].TxStream,  utI2c_DmaConfig[ 0u ].DmaChannel );
+        TEST_ASSERT_EQUAL( (dma_ChannelId_t)periphLut[ idx ].RxStream,  utI2c_DmaConfig[ 1u ].DmaChannel );
+        TEST_ASSERT_EQUAL( periphLut[ idx ].TxSel,                      utI2c_DmaConfig[ 0u ].PeripheralReqId );
+        TEST_ASSERT_EQUAL( periphLut[ idx ].RxSel,                      utI2c_DmaConfig[ 1u ].PeripheralReqId );
         TEST_ASSERT_NOT_NULL( utI2c_AnyIsr );
+
+        /* Channel selection of the list items equals the one used by the request table */
+        TEST_ASSERT_EQUAL_UINT32( (uint32_t)periphLut[ idx ].TxSel >> DMA_SxCR_CHSEL_Pos, I2C_DMA_BIT_MASK_DECODE_CHSEL( periphLut[ idx ].TxDma ) );
+        TEST_ASSERT_EQUAL_UINT32( (uint32_t)periphLut[ idx ].RxSel >> DMA_SxCR_CHSEL_Pos, I2C_DMA_BIT_MASK_DECODE_CHSEL( periphLut[ idx ].RxDma ) );
 
         const uint32_t cr1Value = periphLut[ idx ].PeriphReg->CR1;
         periphLut[ idx ].PeriphReg->SR1 = 0u;
@@ -2081,9 +2143,67 @@ void Ut_I2c_Dma_I2c2I2c3Callbacks_OwnPeripheralReported( void )
 
         utI2c_ErrorCnt = 0u;
     }
-#else
-    TEST_IGNORE_MESSAGE( "MCU without I2C2 / I2C3" );
-#endif /* I2C2 AND I2C3 */
+}
+
+
+/**
+ * \brief   Items of the DMA stream lists carry I2C peripheral, DMA peripheral, stream and channel
+ *          selection of the stream.
+ *
+ * \details Expected values are written as (I2C peripheral, DMA peripheral index, stream number,
+ *          channel selection number) taken from the DMA1 request mapping of the STM32F4
+ *          reference manuals, independently of the encoding macro.
+ *
+ * \par Expected results
+ * - Every transmit and receive item of the I2C peripherals of the MCU carries the expected
+ *   bit-fields.
+ * - Unused items of both lists equal I2C_DMA_CODE_UNUSED, the decoding macros return the fields.
+ */
+void Ut_I2c_DmaLists_Items_EncodePeriphDmaStreamAndChannelSelection( void )
+{
+    /* I2C1 (DMA1) */
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_1, 0u, 6u, 1u ), I2C_TX_DMA_I2C1_DMA1_STREAM6 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_1, 0u, 7u, 1u ), I2C_TX_DMA_I2C1_DMA1_STREAM7 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_1, 0u, 0u, 1u ), I2C_RX_DMA_I2C1_DMA1_STREAM0 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_1, 0u, 5u, 1u ), I2C_RX_DMA_I2C1_DMA1_STREAM5 );
+#if defined(I2C_AF_MAP_F410_F423)
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_1, 0u, 1u, 0u ), I2C_TX_DMA_I2C1_DMA1_STREAM1 );
+#endif /* I2C_AF_MAP_F410_F423 */
+
+#if defined(I2C2)
+    /* I2C2 (DMA1, channel selection 7) */
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_2, 0u, 7u, 7u ), I2C_TX_DMA_I2C2_DMA1_STREAM7 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_2, 0u, 2u, 7u ), I2C_RX_DMA_I2C2_DMA1_STREAM2 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_2, 0u, 3u, 7u ), I2C_RX_DMA_I2C2_DMA1_STREAM3 );
+#endif /* I2C2 */
+
+#if defined(I2C3)
+    /* I2C3 (DMA1) */
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_3, 0u, 4u, 3u ), I2C_TX_DMA_I2C3_DMA1_STREAM4 );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_3, 0u, 2u, 3u ), I2C_RX_DMA_I2C3_DMA1_STREAM2 );
+#if defined(I2C_AF_MAP_F401)      || \
+    defined(I2C_AF_MAP_F410_F423)
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_3, 0u, 5u, 6u ), I2C_TX_DMA_I2C3_DMA1_STREAM5 );
+#endif /* I2C_AF_MAP_F401 OR I2C_AF_MAP_F410_F423 */
+#if defined(I2C_AF_MAP_F401)      || \
+    defined(I2C_AF_MAP_F410_F423) || \
+    defined(I2C_AF_MAP_F446)
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_DMA_CODE( I2C_PERIPH_3, 0u, 1u, 1u ), I2C_RX_DMA_I2C3_DMA1_STREAM1 );
+#endif /* I2C_AF_MAP_F401 OR I2C_AF_MAP_F410_F423 OR I2C_AF_MAP_F446 */
+#endif /* I2C3 */
+
+    /* Decoding of the fields */
+    TEST_ASSERT_EQUAL_UINT32( I2C_PERIPH_1,       I2C_DMA_BIT_MASK_DECODE_PERIPH( I2C_RX_DMA_I2C1_DMA1_STREAM5 ) );
+    TEST_ASSERT_EQUAL_UINT32( I2C_DMA_PERIPH_1,   I2C_DMA_BIT_MASK_DECODE_DMA( I2C_RX_DMA_I2C1_DMA1_STREAM5 ) );
+    TEST_ASSERT_EQUAL_UINT32( I2C_DMA_CHANNEL_5,  I2C_DMA_BIT_MASK_DECODE_STREAM( I2C_RX_DMA_I2C1_DMA1_STREAM5 ) );
+    TEST_ASSERT_EQUAL_UINT32( 1u,                 I2C_DMA_BIT_MASK_DECODE_CHSEL( I2C_RX_DMA_I2C1_DMA1_STREAM5 ) );
+
+    /* Unused stream */
+    TEST_ASSERT_EQUAL_HEX32( I2C_DMA_CODE_UNUSED, I2C_TX_DMA_UNUSED );
+    TEST_ASSERT_EQUAL_HEX32( I2C_DMA_CODE_UNUSED, I2C_RX_DMA_UNUSED );
+    TEST_ASSERT_EQUAL_UINT32( I2C_PERIPH_CNT,      I2C_DMA_BIT_MASK_DECODE_PERIPH( I2C_TX_DMA_UNUSED ) );
+    TEST_ASSERT_EQUAL_UINT32( I2C_DMA_PERIPH_CNT,  I2C_DMA_BIT_MASK_DECODE_DMA( I2C_TX_DMA_UNUSED ) );
+    TEST_ASSERT_EQUAL_UINT32( I2C_DMA_CHANNEL_CNT, I2C_DMA_BIT_MASK_DECODE_STREAM( I2C_TX_DMA_UNUSED ) );
 }
 
 
@@ -2298,11 +2418,9 @@ static i2c_DataConfig_t Ut_I2c_Get_DataConfig( i2c_XferMode_t xferMode )
     i2c_DataConfig_t dataConfig;
 
     dataConfig.XferMode             = xferMode;
-    dataConfig.TxDmaPeriphId        = I2C_DMA_PERIPH_1;
-    dataConfig.TxDmaChannelId       = UT_I2C_DMA_TX_STREAM;
+    dataConfig.TxDma                = UT_I2C_DMA_TX;
     dataConfig.TxDmaPriority        = I2C_DMA_PRIORITY_LOW;
-    dataConfig.RxDmaPeriphId        = I2C_DMA_PERIPH_1;
-    dataConfig.RxDmaChannelId       = UT_I2C_DMA_RX_STREAM;
+    dataConfig.RxDma                = UT_I2C_DMA_RX;
     dataConfig.RxDmaPriority        = I2C_DMA_PRIORITY_HIGH;
     dataConfig.IrqPriority          = UT_I2C_PRIO;
     dataConfig.XferCompleteCallback = Ut_I2c_XferCompleteCallback;
