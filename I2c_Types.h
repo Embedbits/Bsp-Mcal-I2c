@@ -40,6 +40,15 @@ extern "C" {
 /** Maximum 10-bit slave address */
 #define I2C_SLAVE_ADDR_10BIT_MAX            ( 0x3FFu )
 
+/** Highest 7-bit address of the reserved group 0x00 - 0x07 (general call, START byte, CBUS, ...) */
+#define I2C_SLAVE_ADDR_7BIT_RESERVED_LOW    ( 0x07u )
+
+/** Lowest 7-bit address of the reserved group 0x78 - 0x7F (10-bit addressing, device ID) */
+#define I2C_SLAVE_ADDR_7BIT_RESERVED_HIGH   ( 0x78u )
+
+/** General call address reported as matched address of the slave */
+#define I2C_SLAVE_ADDR_GENERAL_CALL         ( 0x00u )
+
 /** Peripheral identification bit offset in encoded pin value */
 #define I2C_BIT_MASK_PERIPH_BIT_OFFSET      ( 15u )
 
@@ -220,13 +229,55 @@ typedef enum
 }   i2c_DigitalFilter_t;
 
 
-/** \brief Master addressing mode (applied to every transfer) */
+/** \brief Addressing mode (master: applied to every transfer, slave: own address 1) */
 typedef enum
 {
     I2C_ADDR_MODE_7BIT = 0u, /**< 7-bit slave address  */
     I2C_ADDR_MODE_10BIT,     /**< 10-bit slave address */
     I2C_ADDR_MODE_CNT        /**< Count of options     */
 }   i2c_AddrMode_t;
+
+
+/** \brief Role of the I2C peripheral */
+typedef enum
+{
+    I2C_ROLE_MASTER = 0u, /**< Master - transfers are started by I2c_Set_XferStart()           */
+    I2C_ROLE_SLAVE,       /**< Slave - own addresses are answered after I2c_Set_ListenStart() */
+    I2C_ROLE_CNT          /**< Count of roles                                                 */
+}   i2c_Role_t;
+
+
+/** \brief Mask of own address 2 - masked bits of the address are not compared (OA2MSK) */
+typedef enum
+{
+    I2C_OWN_ADDR2_MASK_NONE = 0u, /**< All bits of own address 2 are compared                   */
+    I2C_OWN_ADDR2_MASK_1BIT,      /**< Address bit 0 is not compared                            */
+    I2C_OWN_ADDR2_MASK_2BIT,      /**< Address bits 1:0 are not compared                        */
+    I2C_OWN_ADDR2_MASK_3BIT,      /**< Address bits 2:0 are not compared                        */
+    I2C_OWN_ADDR2_MASK_4BIT,      /**< Address bits 3:0 are not compared                        */
+    I2C_OWN_ADDR2_MASK_5BIT,      /**< Address bits 4:0 are not compared                        */
+    I2C_OWN_ADDR2_MASK_6BIT,      /**< Address bits 5:0 are not compared                        */
+    I2C_OWN_ADDR2_MASK_7BIT,      /**< No bit is compared - every not reserved address matches  */
+    I2C_OWN_ADDR2_MASK_CNT        /**< Count of options                                         */
+}   i2c_OwnAddr2Mask_t;
+
+
+/** \brief Clock stretching of the slave (SCL held low until the data are handled) */
+typedef enum
+{
+    I2C_CLOCK_STRETCH_ENABLED = 0u, /**< Clock stretching enabled (no data loss)                         */
+    I2C_CLOCK_STRETCH_DISABLED,     /**< Clock stretching disabled - a late byte gives an overrun error */
+    I2C_CLOCK_STRETCH_CNT           /**< Count of options                                                */
+}   i2c_ClockStretch_t;
+
+
+/** \brief Direction of the slave transfer phase (seen from the master) */
+typedef enum
+{
+    I2C_SLAVE_DIR_WRITE = 0u, /**< Master writes - the slave receives into RxData   */
+    I2C_SLAVE_DIR_READ,       /**< Master reads - the slave transmits from TxData   */
+    I2C_SLAVE_DIR_CNT         /**< Count of directions                              */
+}   i2c_SlaveDir_t;
 
 
 /** \brief Pull resistor of SCL / SDA pins (external pull-up resistors are recommended) */
@@ -502,8 +553,28 @@ typedef enum
     I2C_XFER_ERROR_DMA_CONFIG,          /**< DMA configuration error                                */
     I2C_XFER_ERROR_DMA_CONFIG_UPDATE,   /**< DMA configuration (linked list) update error           */
     I2C_XFER_ERROR_DMA_TRIGGER_OVERRUN, /**< DMA trigger overrun                                    */
+    I2C_XFER_ERROR_OVERRUN,             /**< Slave overrun / underrun - clock stretching disabled
+                                             and a byte was not handled in time (OVR)               */
     I2C_XFER_ERROR_CNT                  /**< Count of data transfer errors                          */
 }   i2c_XferErrorId_t;
+
+
+/**
+ * \brief Result of a slave transfer (from the first address match to the STOP condition)
+ *
+ * The counts belong to the last phase of each direction - a register access (write of the
+ * register address, repeated START, read of the register data) reports both.
+ */
+typedef struct
+{
+    i2c_SlaveAddr_t MatchedAddr;    /**< Own address of the last address match
+                                         (\ref I2C_SLAVE_ADDR_GENERAL_CALL for the general call) */
+    i2c_DataCnt_t   RxCnt;          /**< Bytes received into RxData (last write phase)          */
+    i2c_DataCnt_t   TxCnt;          /**< Bytes transmitted from TxData (last read phase)        */
+    i2c_FlagState_t RxBeyondBuffer; /**< Master wrote more than RxSize bytes - extra bytes were
+                                         acknowledged and discarded                              */
+    i2c_FlagState_t TxBeyondBuffer; /**< Master read more than TxSize bytes - FillByte was sent  */
+}   i2c_SlaveResult_t;
 
 
 /** \brief Transfer complete callback (STOP condition sent after the last byte) */
@@ -512,13 +583,26 @@ typedef void ( i2c_XferCallback_t )( void );
 /** \brief Data transfer error callback, error identification is given as parameter */
 typedef void ( i2c_XferErrCallback_t )( i2c_XferErrorId_t errorId );
 
+/**
+ * \brief Slave address match callback - called with SCL stretched before the data of the phase
+ *        are moved. I2c_Set_SlaveBuffer() called here applies to the starting phase.
+ */
+typedef void ( i2c_SlaveAddrCallback_t )( i2c_SlaveDir_t slaveDir, i2c_SlaveAddr_t matchedAddr );
+
+/** \brief Slave transfer complete callback (STOP condition detected), result is given as parameter */
+typedef void ( i2c_SlaveXferCallback_t )( const i2c_SlaveResult_t * const slaveResult );
+
 
 /**
  * \brief Data handling configuration (common for DMA, ISR and POLL mode)
  *
  * Callback events (equal in all modes):
- * - XferCompleteCallback: all bytes of the request were transferred and STOP condition was sent
- * - ErrorCallback:        transfer was terminated by an error (\ref i2c_XferErrorId_t)
+ * - XferCompleteCallback:      master - all bytes of the request were transferred and STOP
+ *                              condition was sent
+ * - ErrorCallback:             transfer was terminated by an error (\ref i2c_XferErrorId_t),
+ *                              a slave keeps listening
+ * - SlaveAddrCallback:         slave - own address matched, direction of the phase is given
+ * - SlaveXferCompleteCallback: slave - STOP condition ended the transfer, the result is given
  *
  * Unused callback shall be set to I2C_NULL_PTR. DMA identifications / priorities are used only
  * in I2C_XFER_MODE_DMA (transmit and receive channel must differ), IrqPriority is used in DMA
@@ -526,17 +610,58 @@ typedef void ( i2c_XferErrCallback_t )( i2c_XferErrorId_t errorId );
  */
 typedef struct
 {
-    i2c_XferMode_t          XferMode;             /**< Data transfer mode (NONE / DMA / ISR / POLL)     */
-    i2c_DmaPeriphId_t       TxDmaPeriphId;        /**< DMA peripheral (transmission in DMA mode)        */
-    i2c_DmaChannelId_t      TxDmaChannelId;       /**< DMA channel (transmission in DMA mode)           */
-    i2c_DmaPriority_t       TxDmaPriority;        /**< DMA channel priority (transmission in DMA mode)  */
-    i2c_DmaPeriphId_t       RxDmaPeriphId;        /**< DMA peripheral (reception in DMA mode)           */
-    i2c_DmaChannelId_t      RxDmaChannelId;       /**< DMA channel (reception in DMA mode)              */
-    i2c_DmaPriority_t       RxDmaPriority;        /**< DMA channel priority (reception in DMA mode)     */
-    i2c_IrqPrio_t           IrqPriority;          /**< I2C interrupts priority (DMA / ISR mode)         */
-    i2c_XferCallback_t     *XferCompleteCallback; /**< Transfer complete. I2C_NULL_PTR if not used.     */
-    i2c_XferErrCallback_t  *ErrorCallback;        /**< Transfer error. I2C_NULL_PTR if not used.        */
+    i2c_XferMode_t           XferMode;                  /**< Data transfer mode (NONE / DMA / ISR / POLL)     */
+    i2c_DmaPeriphId_t        TxDmaPeriphId;             /**< DMA peripheral (transmission in DMA mode)        */
+    i2c_DmaChannelId_t       TxDmaChannelId;            /**< DMA channel (transmission in DMA mode)           */
+    i2c_DmaPriority_t        TxDmaPriority;             /**< DMA channel priority (transmission in DMA mode)  */
+    i2c_DmaPeriphId_t        RxDmaPeriphId;             /**< DMA peripheral (reception in DMA mode)           */
+    i2c_DmaChannelId_t       RxDmaChannelId;            /**< DMA channel (reception in DMA mode)              */
+    i2c_DmaPriority_t        RxDmaPriority;             /**< DMA channel priority (reception in DMA mode)     */
+    i2c_IrqPrio_t            IrqPriority;               /**< I2C interrupts priority (DMA / ISR mode)         */
+    i2c_XferCallback_t      *XferCompleteCallback;      /**< Transfer complete. I2C_NULL_PTR if not used.     */
+    i2c_XferErrCallback_t   *ErrorCallback;             /**< Transfer error. I2C_NULL_PTR if not used.        */
+    i2c_SlaveAddrCallback_t *SlaveAddrCallback;         /**< Slave address match. I2C_NULL_PTR if not used.   */
+    i2c_SlaveXferCallback_t *SlaveXferCompleteCallback; /**< Slave transfer end. I2C_NULL_PTR if not used.    */
 }   i2c_DataConfig_t;
+
+
+/**
+ * \brief Buffers of the slave given by the application
+ *
+ * - RxData / RxSize: bytes written by the master (every write phase starts at RxData[ 0 ]);
+ *                    further bytes are acknowledged and discarded
+ * - TxData / TxSize: bytes read by the master (every read phase starts at TxData[ 0 ]);
+ *                    further bytes are answered with FillByte of \ref i2c_SlaveConfig_t
+ *
+ * \note  Buffers are not copied - they must stay valid while the slave listens.
+ */
+typedef struct
+{
+    i2c_Data_t       *RxData; /**< Buffer for received bytes. May be I2C_NULL_PTR if RxSize = 0    */
+    i2c_DataCnt_t     RxSize; /**< Size of RxData                                                 */
+    const i2c_Data_t *TxData; /**< Bytes to be transmitted. May be I2C_NULL_PTR if TxSize = 0     */
+    i2c_DataCnt_t     TxSize; /**< Count of bytes in TxData                                       */
+}   i2c_SlaveBuffer_t;
+
+
+/**
+ * \brief Slave configuration (used with \ref I2C_ROLE_SLAVE)
+ *
+ * Own address 1 is mandatory, a 7-bit own address must not be a reserved address
+ * (0x00 - 0x07, 0x78 - 0x7F). Own address 2 is a 7-bit address, its mask selects the bits
+ * which are not compared.
+ */
+typedef struct
+{
+    i2c_SlaveAddr_t      OwnAddr;       /**< Own address 1 (not shifted, without R/W bit)           */
+    i2c_AddrMode_t       OwnAddrMode;   /**< Own address 1 is 7-bit or 10-bit                       */
+    i2c_FunctionState_t  OwnAddr2State; /**< Own address 2 is answered                              */
+    i2c_SlaveAddr_t      OwnAddr2;      /**< Own address 2 (7-bit, not shifted)                     */
+    i2c_OwnAddr2Mask_t   OwnAddr2Mask;  /**< Bits of own address 2 which are not compared           */
+    i2c_FunctionState_t  GeneralCall;   /**< General call address (0x00) is answered                */
+    i2c_ClockStretch_t   ClockStretch;  /**< Clock stretching of the slave                          */
+    i2c_Data_t           FillByte;      /**< Byte sent when the master reads beyond TxSize          */
+}   i2c_SlaveConfig_t;
 
 
 /**
@@ -566,10 +691,13 @@ typedef struct
     i2c_PeriphId_t           PeriphId;      /**< I2C peripheral identification                                  */
     i2c_ClkSrc_t             ClkSrc;        /**< I2C kernel clock source                                        */
     i2c_FreqHz_t             BusFreq;       /**< Required SCL frequency in Hz (1 - 1 MHz). Mode is derived:
-                                                 up to 100 kHz Standard, 400 kHz Fast, 1 MHz Fast-mode Plus    */
+                                                 up to 100 kHz Standard, 400 kHz Fast, 1 MHz Fast-mode Plus.
+                                                 Slave: bus speed of the master (data setup / hold timing)     */
     i2c_AnalogFilter_t       AnalogFilter;  /**< Analog noise filter state                                      */
     i2c_DigitalFilter_t      DigitalFilter; /**< Digital noise filter length                                    */
     i2c_AddrMode_t           AddrMode;      /**< Master addressing mode                                         */
+    i2c_Role_t               Role;          /**< Master or slave                                                */
+    i2c_SlaveConfig_t        SlaveConfig;   /**< Own addresses and behavior of the slave (\ref I2C_ROLE_SLAVE)  */
 
     const i2c_DataConfig_t  *DataConfig;    /**< Data handling configuration (copied). I2C_NULL_PTR - data
                                                  handling is not initialized                                   */
