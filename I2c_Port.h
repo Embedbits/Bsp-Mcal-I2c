@@ -66,6 +66,14 @@ i2c_RequestState_t      I2c_Set_XferStop                ( i2c_PeriphId_t periphI
 i2c_RequestState_t      I2c_Get_XferState               ( i2c_PeriphId_t periphId, i2c_FunctionState_t * const xferState );
 i2c_RequestState_t      I2c_Get_XferError               ( i2c_PeriphId_t periphId, i2c_XferErrorId_t * const xferError );
 
+/*---------------------------- Slave (listen) --------------------------------*/
+
+i2c_RequestState_t      I2c_Set_ListenStart             ( i2c_PeriphId_t periphId, const i2c_SlaveBuffer_t * const slaveBuffer );
+i2c_RequestState_t      I2c_Set_ListenStop              ( i2c_PeriphId_t periphId );
+i2c_RequestState_t      I2c_Get_ListenState             ( i2c_PeriphId_t periphId, i2c_FunctionState_t * const listenState );
+i2c_RequestState_t      I2c_Set_SlaveBuffer             ( i2c_PeriphId_t periphId, const i2c_SlaveBuffer_t * const slaveBuffer );
+i2c_RequestState_t      I2c_Get_SlaveResult             ( i2c_PeriphId_t periphId, i2c_SlaveResult_t * const slaveResult );
+
 /*------------------------------ Interrupts ----------------------------------*/
 
 i2c_RequestState_t      I2c_Set_IrqPriority             ( i2c_PeriphId_t periphId, i2c_IrqPrio_t irqPrio );
