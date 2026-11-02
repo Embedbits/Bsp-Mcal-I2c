@@ -32,6 +32,10 @@ i2c_RequestState_t I2c_Dma_XferStart    ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Dma_XferStop     ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Dma_Check_Done   ( i2c_PeriphId_t periphId );
 
+i2c_RequestState_t I2c_Dma_Listen        ( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState );
+i2c_RequestState_t I2c_Dma_SlavePhase    ( i2c_PeriphId_t periphId );
+i2c_RequestState_t I2c_Dma_SlavePhaseEnd ( i2c_PeriphId_t periphId );
+
 #ifdef __cplusplus
 }
 #endif

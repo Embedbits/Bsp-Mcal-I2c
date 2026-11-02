@@ -161,8 +161,8 @@ i2c_RequestState_t I2c_Poll_XferStop( i2c_PeriphId_t periphId )
 
 
 /**
- * \brief Polls I2C flags of one peripheral and moves the running polling transfer (called from
- *        I2c_Task())
+ * \brief Polls I2C flags of one peripheral and moves the running polling transfer or processes
+ *        the events of the listening slave (called from I2c_Task())
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  *
@@ -171,12 +171,29 @@ i2c_RequestState_t I2c_Poll_XferStop( i2c_PeriphId_t periphId )
  */
 i2c_RequestState_t I2c_Poll_Task( i2c_PeriphId_t periphId )
 {
-    i2c_RequestState_t retState  = I2C_REQUEST_ERROR;
-    I2C_TypeDef *      periphReg = I2C_NULL_PTR;
+    i2c_RequestState_t  retState  = I2C_REQUEST_ERROR;
+    I2C_TypeDef *       periphReg = I2C_NULL_PTR;
+    i2c_XferContext_t * xferCtx   = I2C_NULL_PTR;
 
     retState = I2c_Get_PeriphReg( periphId, &periphReg );
 
     if( I2C_REQUEST_OK == retState )
+    {
+        retState = I2c_Get_XferContext( periphId, &xferCtx );
+    }
+    else
+    {
+        /* Invalid peripheral identification */
+    }
+
+    if( ( I2C_REQUEST_OK == retState      ) &&
+        ( I2C_ROLE_SLAVE == xferCtx->Role )    )
+    {
+        const i2c_IsrFlags_t isrFlags = LL_I2C_ReadReg( periphReg, ISR );
+
+        retState = I2c_Set_SlaveEvents( periphId, isrFlags );
+    }
+    else if( I2C_REQUEST_OK == retState )
     {
         const i2c_IsrFlags_t isrFlags = LL_I2C_ReadReg( periphReg, ISR );
 

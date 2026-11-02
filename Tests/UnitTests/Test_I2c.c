@@ -15,7 +15,7 @@
  *       - ISR flags are not cleared by ICR writes and data register accesses,
  *         tests preset the flags handled by the module before each step,
  *       - CR2.START is not cleared by hardware after the address phase, tests
- *         clear it before the next request (\ref Ut_I2c_Set_StartSent),
+ *         clear it before the next request (\ref UtI2c_Set_StartSent),
  *       - ISR.TXE is set by the TX flush of the module (write of TXE to ISR).
  *
  * \note Data handling context of the module is static - setUp() releases the
@@ -51,28 +51,37 @@ typedef struct
 
 /* ======================= FORWARD DECLARATIONS ============================= */
 
-static nvic_RequestState_t  Ut_I2c_NvicSetHandlerStub   ( nvic_PeriphIrqList_t irqId, const nvic_IsrCallback_t irqHandler, int callCnt );
-static rcc_RequestState_t   Ut_I2c_RccGetClkSrcStub     ( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt );
-static rcc_RequestState_t   Ut_I2c_RccGetClkStub        ( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt );
-static rcc_RequestState_t   Ut_I2c_RccGetAnyClkSrcStub  ( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt );
-static rcc_RequestState_t   Ut_I2c_RccGetAnyClkStub     ( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt );
-static rcc_RequestState_t   Ut_I2c_RccResetHsiStub      ( rcc_PeriphId_t periphId, int callCnt );
-static gpio_RequestState_t  Ut_I2c_GpioInitStub         ( gpio_Config_t *gpioConfig, int callCnt );
-static dma_RequestState_t   Ut_I2c_DmaInitStub          ( dma_ConfigStruct_t * const dmaConfig, int callCnt );
-static dma_RequestState_t   Ut_I2c_DmaGetCountStub      ( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, dma_DataCount_t * const dataCount, int callCnt );
-static dma_RequestState_t   Ut_I2c_DmaIrqOffStub        ( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, int callCnt );
-static void                 Ut_I2c_Ignore_PeriphMocks   ( void );
-static void                 Ut_I2c_Release              ( void );
-static void                 Ut_I2c_Reset_Mocks          ( void );
-static i2c_Config_t         Ut_I2c_Get_Config           ( void );
-static i2c_DataConfig_t     Ut_I2c_Get_DataConfig       ( i2c_XferMode_t xferMode );
-static void                 Ut_I2c_Init                 ( const i2c_DataConfig_t * const dataConfig );
-static void                 Ut_I2c_Call_Isr             ( uint32_t isrFlags );
-static void                 Ut_I2c_Set_StartSent        ( void );
-static uint32_t             Ut_I2c_Get_Cr2Xfer          ( void );
+static nvic_RequestState_t  UtI2c_NvicSetHandlerStub   ( nvic_PeriphIrqList_t irqId, const nvic_IsrCallback_t irqHandler, int callCnt );
+static rcc_RequestState_t   UtI2c_RccGetClkSrcStub     ( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt );
+static rcc_RequestState_t   UtI2c_RccGetClkStub        ( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt );
+static rcc_RequestState_t   UtI2c_RccGetAnyClkSrcStub  ( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt );
+static rcc_RequestState_t   UtI2c_RccGetAnyClkStub     ( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt );
+static rcc_RequestState_t   UtI2c_RccResetHsiStub      ( rcc_PeriphId_t periphId, int callCnt );
+static gpio_RequestState_t  UtI2c_GpioInitStub         ( gpio_Config_t *gpioConfig, int callCnt );
+static dma_RequestState_t   UtI2c_DmaInitStub          ( dma_ConfigStruct_t * const dmaConfig, int callCnt );
+static dma_RequestState_t   UtI2c_DmaGetCountStub      ( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, dma_DataCount_t * const dataCount, int callCnt );
+static dma_RequestState_t   UtI2c_DmaIrqOffStub        ( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, int callCnt );
+static void                 UtI2c_Ignore_PeriphMocks   ( void );
+static void                 UtI2c_Release              ( void );
+static void                 UtI2c_Reset_Mocks          ( void );
+static i2c_Config_t         UtI2c_Get_Config           ( void );
+static i2c_DataConfig_t     UtI2c_Get_DataConfig       ( i2c_XferMode_t xferMode );
+static void                 UtI2c_Init                 ( const i2c_DataConfig_t * const dataConfig );
+static void                 UtI2c_Call_Isr             ( uint32_t isrFlags );
+static void                 UtI2c_Set_StartSent        ( void );
+static uint32_t             UtI2c_Get_Cr2Xfer          ( void );
 
-static void                 Ut_I2c_XferCompleteCallback ( void );
-static void                 Ut_I2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
+static void                 UtI2c_XferCompleteCallback ( void );
+static void                 UtI2c_ErrorCallback        ( i2c_XferErrorId_t errorId );
+
+static i2c_SlaveConfig_t    UtI2c_Get_SlaveConfig      ( void );
+static void                 UtI2c_Init_Slave           ( const i2c_DataConfig_t * const dataConfig,
+                                                         const i2c_SlaveConfig_t * const slaveConfig );
+static void                 UtI2c_Start_Listen         ( i2c_DataCnt_t rxSize, i2c_DataCnt_t txSize );
+static void                 UtI2c_Slave_Event          ( uint32_t isrFlags );
+static void                 UtI2c_Emulate_PeriphReset  ( void );
+static void                 UtI2c_SlaveAddrCallback    ( i2c_SlaveDir_t slaveDir, i2c_SlaveAddr_t matchedAddr );
+static void                 UtI2c_SlaveDoneCallback    ( const i2c_SlaveResult_t * const slaveResult );
 
 /* ========================= SYMBOLIC CONSTANTS ============================= */
 
@@ -109,7 +118,60 @@ static void                 Ut_I2c_ErrorCallback        ( i2c_XferErrorId_t erro
 /** Size of long transfer (more than one NBYTES chunk) */
 #define UT_I2C_LONG_SIZE                    ( 300u )
 
+/** Own address 1 of slave tests (7-bit / 10-bit) and own address 2 */
+#define UT_I2C_OWN_ADDR                     ( 0x2Cu )
+#define UT_I2C_OWN_ADDR10                   ( 0x2B7u )
+#define UT_I2C_OWN_ADDR2                    ( 0x3Au )
+
+/** Fill byte of slave tests */
+#define UT_I2C_FILL_BYTE                    ( 0xA5u )
+
+/** Default fill byte of the slave configuration */
+#define UT_I2C_FILL_BYTE_DEFAULT            ( 0xFFu )
+
+/** Limits of the own address 1 / 2 checked by the slave configuration tests */
+#define UT_I2C_ADDR_GENERAL_CALL            ( 0x00u )
+#define UT_I2C_ADDR_RESERVED_LAST           ( 0x07u )
+#define UT_I2C_ADDR_RESERVED_10BIT          ( 0x78u )
+#define UT_I2C_ADDR_FIRST_VALID             ( 0x08u )
+#define UT_I2C_ADDR_LAST_VALID              ( 0x77u )
+#define UT_I2C_ADDR10_OVER_MAX              ( 0x400u )
+#define UT_I2C_ADDR10_MAX                   ( 0x3FFu )
+#define UT_I2C_ADDR2_RESERVED               ( 0x7Cu )
+
+/** Shift of the two high bits of a 10-bit address into the header (11110XX) */
+#define UT_I2C_ADDR10_HIGH_SHIFT            ( 8u )
+
+/** Bytes received / transmitted by the slave tests */
+#define UT_I2C_RX_BYTE_1                    ( 0xA1u )
+#define UT_I2C_RX_BYTE_2                    ( 0xA2u )
+#define UT_I2C_RX_BYTE_3                    ( 0xC3u )
+#define UT_I2C_RX_BYTE_4                    ( 0x5Au )
+#define UT_I2C_RX_BASE                      ( 0xB0u )
+#define UT_I2C_TX_BASE                      ( 0x60u )
+
+/** Counts of bytes / events of the slave tests */
+#define UT_I2C_CNT_TWO                      ( 2u )
+#define UT_I2C_CNT_THREE                    ( 3u )
+#define UT_I2C_CNT_FOUR                     ( 4u )
+#define UT_I2C_CNT_FIVE                     ( 5u )
+
+/** Size of the slave buffers */
+#define UT_I2C_SLAVE_BUF_SIZE               ( 8u )
+
+/** Interrupt enable bits of a listening slave in ISR mode */
+#define UT_I2C_SLAVE_ISR_IRQS               ( I2C_CR1_ADDRIE | I2C_CR1_NACKIE | I2C_CR1_STOPIE | \
+                                              I2C_CR1_ERRIE  | I2C_CR1_TXIE   | I2C_CR1_RXIE     )
+
+/** Interrupt enable bits of a listening slave in DMA mode */
+#define UT_I2C_SLAVE_DMA_IRQS               ( I2C_CR1_ADDRIE | I2C_CR1_NACKIE | I2C_CR1_STOPIE | I2C_CR1_ERRIE )
+
 /* ============================== MACROS ==================================== */
+
+/** ISR flags of an address match (direction: 0 write, 1 read; 7-bit address code) */
+#define UT_I2C_ADDR_ISR( READ, CODE )           ( I2C_ISR_ADDR                                                  | \
+                                                  ( (READ) * I2C_ISR_DIR )                                      | \
+                                                  ( ( (uint32_t)(CODE) << I2C_ISR_ADDCODE_Pos ) & I2C_ISR_ADDCODE ) )
 
 /** Expected CR2 transfer fields (SADD, NBYTES, AUTOEND / RELOAD, RD_WRN) */
 #define UT_I2C_CR2( ADDR, NBYTES, END, RD )     ( ( ( (uint32_t)(ADDR) << 1u ) & I2C_CR2_SADD )                           | \
@@ -316,6 +378,20 @@ static dma_RequestState_t       utI2c_DmaInitRxState;
 static uint32_t                 utI2c_DmaIrqOffCnt;
 static dma_RequestState_t       utI2c_DmaIrqOffState;
 
+/** Buffers of the slave */
+static i2c_Data_t               utI2c_SlaveRx[ UT_I2C_SLAVE_BUF_SIZE ];
+static i2c_Data_t               utI2c_SlaveTx[ UT_I2C_SLAVE_BUF_SIZE ];
+
+/** Records of the slave callbacks */
+static uint32_t                 utI2c_SlaveAddrCnt;
+static i2c_SlaveDir_t           utI2c_SlaveDir;
+static i2c_SlaveAddr_t          utI2c_SlaveAddr;
+static uint32_t                 utI2c_SlaveDoneCnt;
+static i2c_SlaveResult_t        utI2c_SlaveResult;
+
+/** Transmit buffer set by the address callback of a read phase (NULL - buffers kept) */
+static const i2c_Data_t *       utI2c_SlaveRegTx;
+
 /* ============================ TEST FIXTURE ================================ */
 
 void setUp( void )
@@ -326,11 +402,16 @@ void setUp( void )
     utI2c_DmaIrqOffState = DMA_REQUEST_OK;
     utI2c_DmaInitRxState = DMA_REQUEST_OK;
 
-    Ut_I2c_Release();
+    UtI2c_Release();
 
     TEST_ASSERT_EQUAL( REGMEM_REQUEST_OK, RegMem_Reset() );
 
     utI2c_Isr          = NULL;
+    utI2c_SlaveAddrCnt = 0u;
+    utI2c_SlaveDir     = I2C_SLAVE_DIR_CNT;
+    utI2c_SlaveAddr    = 0u;
+    utI2c_SlaveDoneCnt = 0u;
+    utI2c_SlaveRegTx   = NULL;
     utI2c_CompleteCnt  = 0u;
     utI2c_ErrorCnt     = 0u;
     utI2c_LastError    = I2C_XFER_ERROR_CNT;
@@ -363,14 +444,14 @@ void tearDown( void )
  * \details Reads the module version structure.
  *
  * \par Expected results
- * - Version is 1.0.0 (Major 1, Minor 0, Patch 0).
+ * - Version is 1.1.0 (Major 1, Minor 1, Patch 0).
  */
 void Ut_I2c_Get_ModuleVersion_ReturnsVersion( void )
 {
     const i2c_ModuleVersion_t version = I2c_Get_ModuleVersion();
 
     TEST_ASSERT_EQUAL_UINT8( 1u, version.Major );
-    TEST_ASSERT_EQUAL_UINT8( 0u, version.Minor );
+    TEST_ASSERT_EQUAL_UINT8( 1u, version.Minor );
     TEST_ASSERT_EQUAL_UINT8( 0u, version.Patch );
 }
 
@@ -403,6 +484,14 @@ void Ut_I2c_Get_DefaultConfig_ReturnsDefaults( void )
     TEST_ASSERT_EQUAL( I2C_SCL_PIN_UNUSED,        config.SclPin );
     TEST_ASSERT_EQUAL( I2C_SDA_PIN_UNUSED,        config.SdaPin );
     TEST_ASSERT_EQUAL( I2C_PIN_PULL_NONE,         config.PinPull );
+    TEST_ASSERT_EQUAL( I2C_ROLE_MASTER,           config.Role );
+    TEST_ASSERT_EQUAL_HEX16( 0u,                  config.SlaveConfig.OwnAddr );
+    TEST_ASSERT_EQUAL( I2C_ADDR_MODE_7BIT,        config.SlaveConfig.OwnAddrMode );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE,     config.SlaveConfig.OwnAddr2State );
+    TEST_ASSERT_EQUAL( I2C_OWN_ADDR2_MASK_NONE,   config.SlaveConfig.OwnAddr2Mask );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE,     config.SlaveConfig.GeneralCall );
+    TEST_ASSERT_EQUAL( I2C_CLOCK_STRETCH_ENABLED, config.SlaveConfig.ClockStretch );
+    TEST_ASSERT_EQUAL_HEX8( UT_I2C_FILL_BYTE_DEFAULT, config.SlaveConfig.FillByte );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Get_DefaultConfig( NULL ) );
 }
@@ -422,34 +511,34 @@ void Ut_I2c_Get_DefaultConfig_ReturnsDefaults( void )
  */
 void Ut_I2c_Init_InvalidConfig_ReturnsErrorWithoutAccess( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( NULL ) );
 
     config.PeriphId = I2C_PERIPH_CNT;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 
-    config = Ut_I2c_Get_Config();
+    config = UtI2c_Get_Config();
     config.ClkSrc = I2C_CLK_SRC_CNT;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 
-    config = Ut_I2c_Get_Config();
+    config = UtI2c_Get_Config();
     config.BusFreq = 0u;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 
-    config = Ut_I2c_Get_Config();
+    config = UtI2c_Get_Config();
     config.BusFreq = I2C_BUS_FREQ_MAX_HZ + 1u;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 
-    config = Ut_I2c_Get_Config();
+    config = UtI2c_Get_Config();
     config.DigitalFilter = I2C_DIGITAL_FILTER_CNT;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 
-    config = Ut_I2c_Get_Config();
+    config = UtI2c_Get_Config();
     config.AddrMode = I2C_ADDR_MODE_CNT;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 
-    config = Ut_I2c_Get_Config();
+    config = UtI2c_Get_Config();
     config.PinPull = I2C_PIN_PULL_CNT;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
 }
@@ -466,7 +555,7 @@ void Ut_I2c_Init_InvalidConfig_ReturnsErrorWithoutAccess( void )
  */
 void Ut_I2c_Init_PinOfOtherPeripheral_ReturnsErrorWithoutAccess( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     config.SclPin = (i2c_SclPin_t)I2C_PIN_BIT_MASK_ENCODE( I2C_PERIPH_3, GPIO_PORT_C, GPIO_PIN_ID_0, GPIO_ALT_FUNC_4 );
 
@@ -488,14 +577,14 @@ void Ut_I2c_Init_PinOfOtherPeripheral_ReturnsErrorWithoutAccess( void )
  */
 void Ut_I2c_Init_DefaultConfig_ClockTimingAndEnable( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     Rcc_Set_PeriphInactive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
     Rcc_Set_PeriphActive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
     Rcc_Set_ResetActive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 
@@ -518,7 +607,7 @@ void Ut_I2c_Init_DefaultConfig_ClockTimingAndEnable( void )
  */
 void Ut_I2c_Init_HsiClockSource_SelectedClockActivated( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     config.ClkSrc = I2C_CLK_SRC_HSI;
     utI2c_ClkSrc  = UT_I2C_RCC_HSI;
@@ -527,8 +616,8 @@ void Ut_I2c_Init_HsiClockSource_SelectedClockActivated( void )
     Rcc_Set_PeriphActive_ExpectAndReturn( UT_I2C_RCC_HSI, RCC_REQUEST_OK );
     Rcc_Set_ResetActive_ExpectAndReturn( UT_I2C_RCC_HSI, RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_ExpectAndReturn( UT_I2C_RCC_HSI, RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 }
@@ -552,20 +641,20 @@ void Ut_I2c_Init_HsiClockSource_SelectedClockActivated( void )
  */
 void Ut_I2c_Init_ReInitOtherClockSource_ActiveSourceReleased( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
-    Ut_I2c_Init( NULL );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( NULL );
+    UtI2c_Reset_Mocks();
 
     config.ClkSrc = I2C_CLK_SRC_HSI;
     utI2c_ClkSrc  = UT_I2C_RCC_HSI;
 
     Rcc_Set_PeriphInactive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
     Rcc_Set_PeriphActive_ExpectAndReturn( UT_I2C_RCC_HSI, RCC_REQUEST_OK );
-    Rcc_Set_ResetActive_StubWithCallback( Ut_I2c_RccResetHsiStub );
+    Rcc_Set_ResetActive_StubWithCallback( UtI2c_RccResetHsiStub );
     Rcc_Set_ResetInactive_ExpectAndReturn( UT_I2C_RCC_HSI, RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 
@@ -585,7 +674,7 @@ void Ut_I2c_Init_ReInitOtherClockSource_ActiveSourceReleased( void )
  */
 void Ut_I2c_Init_ClockError_ReturnsErrorPeripheralNotEnabled( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     Rcc_Set_PeriphInactive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_ERROR );
 
@@ -611,13 +700,13 @@ void Ut_I2c_Init_ClockError_ReturnsErrorPeripheralNotEnabled( void )
 void Ut_I2c_Init_KernelClockZero_ReturnsErrorPeripheralNotEnabled( void )
 {
     static rcc_FreqHz_t zeroClk = 0u;
-    i2c_Config_t        config  = Ut_I2c_Get_Config();
+    i2c_Config_t        config  = UtI2c_Get_Config();
 
     Rcc_Set_PeriphActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_PeriphInactive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_IgnoreAndReturn( RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
     Rcc_Get_PeriphClk_ExpectAnyArgsAndReturn( RCC_REQUEST_OK );
     Rcc_Get_PeriphClk_ReturnThruPtr_periphClk( &zeroClk );
 
@@ -639,7 +728,7 @@ void Ut_I2c_Init_KernelClockZero_ReturnsErrorPeripheralNotEnabled( void )
  */
 void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     config.SclPin  = I2C_SCL_PIN_I2C1_PB6;
     config.SdaPin  = I2C_SDA_PIN_I2C1_PB7;
@@ -649,9 +738,9 @@ void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
     Rcc_Set_PeriphInactive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_IgnoreAndReturn( RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
-    Gpio_Init_StubWithCallback( Ut_I2c_GpioInitStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
+    Gpio_Init_StubWithCallback( UtI2c_GpioInitStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 
@@ -676,7 +765,7 @@ void Ut_I2c_Init_Pins_GpioOpenDrainAlternateWithPull( void )
  */
 void Ut_I2c_Init_FiltersAndAddrMode_RegistersConfigured( void )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     config.AnalogFilter  = I2C_ANALOG_FILTER_DISABLED;
     config.DigitalFilter = I2C_DIGITAL_FILTER_5;
@@ -686,8 +775,8 @@ void Ut_I2c_Init_FiltersAndAddrMode_RegistersConfigured( void )
     Rcc_Set_PeriphInactive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_IgnoreAndReturn( RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 
@@ -710,8 +799,8 @@ void Ut_I2c_Init_FiltersAndAddrMode_RegistersConfigured( void )
  */
 void Ut_I2c_Init_IsrDataConfig_InterruptsConfigured( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
-    i2c_Config_t           config     = Ut_I2c_Get_Config();
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_Config_t           config     = UtI2c_Get_Config();
     i2c_DataConfig_t       readConfig;
 
     config.DataConfig = &dataConfig;
@@ -720,9 +809,9 @@ void Ut_I2c_Init_IsrDataConfig_InterruptsConfigured( void )
     Rcc_Set_PeriphInactive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_IgnoreAndReturn( RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
-    Nvic_Set_PeriphIrq_Handler_StubWithCallback( Ut_I2c_NvicSetHandlerStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
+    Nvic_Set_PeriphIrq_Handler_StubWithCallback( UtI2c_NvicSetHandlerStub );
     Nvic_Set_PeriphIrq_Prio_ExpectAndReturn( UT_I2C_NVIC_EV, UT_I2C_PRIO, NVIC_REQUEST_OK );
     Nvic_Set_PeriphIrq_Prio_ExpectAndReturn( UT_I2C_NVIC_ER, UT_I2C_PRIO, NVIC_REQUEST_OK );
     Nvic_Set_PeriphIrq_Active_ExpectAndReturn( UT_I2C_NVIC_EV, NVIC_REQUEST_OK );
@@ -733,7 +822,7 @@ void Ut_I2c_Init_IsrDataConfig_InterruptsConfigured( void )
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_DataConfig( UT_I2C_PERIPH, &readConfig ) );
     TEST_ASSERT_EQUAL( I2C_XFER_MODE_ISR, readConfig.XferMode );
-    TEST_ASSERT_EQUAL_PTR( Ut_I2c_XferCompleteCallback, readConfig.XferCompleteCallback );
+    TEST_ASSERT_EQUAL_PTR( UtI2c_XferCompleteCallback, readConfig.XferCompleteCallback );
 }
 
 /* =========================== DEINITIALIZATION ============================= */
@@ -751,8 +840,8 @@ void Ut_I2c_Init_IsrDataConfig_InterruptsConfigured( void )
  */
 void Ut_I2c_Deinit_InitializedPeripheral_DisabledResetAndClockOff( void )
 {
-    Ut_I2c_Init( NULL );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( NULL );
+    UtI2c_Reset_Mocks();
 
     Rcc_Set_ResetActive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_ExpectAndReturn( UT_I2C_RCC_PCLK, RCC_REQUEST_OK );
@@ -776,11 +865,11 @@ void Ut_I2c_Deinit_InitializedPeripheral_DisabledResetAndClockOff( void )
  */
 void Ut_I2c_Deinit_IsrDataConfig_InterruptsDisabled( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
     i2c_DataConfig_t       readConfig;
 
-    Ut_I2c_Init( &dataConfig );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( &dataConfig );
+    UtI2c_Reset_Mocks();
 
     Nvic_Set_PeriphIrq_Inactive_ExpectAndReturn( UT_I2C_NVIC_EV, NVIC_REQUEST_OK );
     Nvic_Set_PeriphIrq_Inactive_ExpectAndReturn( UT_I2C_NVIC_ER, NVIC_REQUEST_OK );
@@ -807,8 +896,8 @@ void Ut_I2c_Deinit_IsrDataConfig_InterruptsDisabled( void )
  */
 void Ut_I2c_Deinit_FastModePlusActive_FmpDriverDisabled( void )
 {
-    Ut_I2c_Init( NULL );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( NULL );
+    UtI2c_Reset_Mocks();
     SYSCFG->CFGR1 |= UT_I2C_FMP_BIT;
 
     Rcc_Set_PeriphActive_ExpectAndReturn( RCC_PERIPH_SYSCFG, RCC_REQUEST_OK );
@@ -927,8 +1016,8 @@ void Ut_I2c_Set_BusFreq_StandardFastFastPlus_ReadBackWithinTolerance( void )
     const i2c_FreqHz_t freqs[] = { 10000u, 100000u, 400000u, 1000000u };
     i2c_FreqHz_t       busFreq = 0u;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
     Rcc_Set_PeriphActive_IgnoreAndReturn( RCC_REQUEST_OK );
 
     for( uint32_t idx = 0u; ( sizeof( freqs ) / sizeof( freqs[ 0u ] ) ) > idx; idx++ )
@@ -957,8 +1046,8 @@ void Ut_I2c_Set_BusFreq_FastModePlus_FmpBitControlled( void )
 {
     SYSCFG->CFGR1 = SYSCFG_CFGR1_I2C3_FMP;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     Rcc_Set_PeriphActive_ExpectAndReturn( RCC_PERIPH_SYSCFG, RCC_REQUEST_OK );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_BusFreq( UT_I2C_PERIPH, 1000000u ) );
@@ -982,8 +1071,8 @@ void Ut_I2c_Set_BusFreq_FastModePlus_FmpBitControlled( void )
  */
 void Ut_I2c_Set_BusFreq_SyscfgClockError_ReturnsError( void )
 {
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
     Rcc_Set_PeriphActive_ExpectAndReturn( RCC_PERIPH_SYSCFG, RCC_REQUEST_ERROR );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_BusFreq( UT_I2C_PERIPH, 1000000u ) );
@@ -1007,8 +1096,8 @@ void Ut_I2c_Get_BusFreq_FmpState_SpeedModeCharacteristicsUsed( void )
     i2c_FreqHz_t fmpFreq = 0u;
     i2c_FreqHz_t fmFreq  = 0u;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
     Rcc_Set_PeriphActive_IgnoreAndReturn( RCC_REQUEST_OK );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_BusFreq( UT_I2C_PERIPH, 1000000u ) );
@@ -1031,8 +1120,8 @@ void Ut_I2c_Get_BusFreq_FmpState_SpeedModeCharacteristicsUsed( void )
  */
 void Ut_I2c_Set_BusFreq_TimingFieldsMeetStandardModeLimits( void )
 {
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_BusFreq( UT_I2C_PERIPH, 100000u ) );
 
@@ -1058,8 +1147,8 @@ void Ut_I2c_Set_BusFreq_TimingFieldsMeetStandardModeLimits( void )
  */
 void Ut_I2c_Set_BusFreq_InvalidOrEnabled_ReturnsErrorWithoutWrite( void )
 {
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_BusFreq( UT_I2C_PERIPH, 0u ) );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_BusFreq( UT_I2C_PERIPH, I2C_BUS_FREQ_MAX_HZ + 1u ) );
@@ -1084,8 +1173,8 @@ void Ut_I2c_Set_BusFreq_ClockTooSlowForFastPlus_ReturnsError( void )
 {
     utI2c_PclkHz = 4000000u;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_BusFreq( UT_I2C_PERIPH, 1000000u ) );
 
@@ -1113,8 +1202,8 @@ void Ut_I2c_Set_BusFreq_KernelClkBelowSpeedModeMinimum_ReturnsError( void )
 {
     utI2c_ClkSrc = UT_I2C_RCC_HSI;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_BusFreq( UT_I2C_PERIPH, 1000000u ) );
     TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->TIMINGR );
@@ -1144,8 +1233,8 @@ void Ut_I2c_Set_BusFreq_ApbKernelClkRatioWindow_ReturnsError( void )
 {
     utI2c_ClkSrc = UT_I2C_RCC_HSI;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
 
     utI2c_PclkHz = 24000000u;
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_BusFreq( UT_I2C_PERIPH, 100000u ) );
@@ -1180,7 +1269,7 @@ void Ut_I2c_Set_BusFreq_ApbClockUnknown_ReturnsError( void )
 {
     static rcc_FreqHz_t kernelClk = UT_I2C_CLK_HZ;
 
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
     Rcc_Get_PeriphClk_ExpectAnyArgsAndReturn( RCC_REQUEST_OK );
     Rcc_Get_PeriphClk_ReturnThruPtr_periphClk( &kernelClk );
     Rcc_Get_PeriphClk_ExpectAnyArgsAndReturn( RCC_REQUEST_ERROR );
@@ -1379,7 +1468,7 @@ void Ut_I2c_Get_IrqPriority_ReadFromEventLine( void )
  */
 void Ut_I2c_Set_DataConfig_InvalidConfig_ReturnsErrorWithoutAccess( void )
 {
-    i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, NULL ) );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( I2C_PERIPH_CNT, &dataConfig ) );
@@ -1400,32 +1489,32 @@ void Ut_I2c_Set_DataConfig_InvalidConfig_ReturnsErrorWithoutAccess( void )
  */
 void Ut_I2c_Set_DataConfig_DmaInvalidChannels_ReturnsErrorWithoutAccess( void )
 {
-    i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
 
     dataConfig.RxDma = (i2c_RxDma_t)dataConfig.TxDma;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig       = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     dataConfig.TxDma = I2C_TX_DMA_UNUSED;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig       = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     dataConfig.RxDma = I2C_RX_DMA_UNUSED;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig       = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     dataConfig.TxDma = I2C_TX_DMA_I2C3_DMA1_CHANNEL2;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig       = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     dataConfig.RxDma = I2C_RX_DMA_I2C3_DMA1_CHANNEL3;
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig       = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     dataConfig.TxDma = (i2c_TxDma_t)I2C_DMA_ENCODE( UT_I2C_PERIPH, I2C_DMA_PERIPH_1, I2C_DMA_CHANNEL_CNT, 3u );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
-    dataConfig       = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    dataConfig       = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     dataConfig.RxDma = (i2c_RxDma_t)I2C_DMA_ENCODE( UT_I2C_PERIPH, I2C_DMA_PERIPH_CNT, I2C_DMA_CHANNEL_7, 3u );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 }
@@ -1484,9 +1573,9 @@ void Ut_I2c_DmaLists_Items_EncodePeriphDmaChannelAndSelection( void )
  */
 void Ut_I2c_DmaLists_Items_ChannelAndRequestPassedToDma( void )
 {
-    Ut_I2c_Ignore_PeriphMocks();
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetAnyClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetAnyClkStub );
+    UtI2c_Ignore_PeriphMocks();
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetAnyClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetAnyClkStub );
     Nvic_Set_PeriphIrq_Handler_IgnoreAndReturn( NVIC_REQUEST_OK );
 
     for( uint32_t rowIdx = 0u; UT_I2C_DMA_ROW_CNT > rowIdx; rowIdx++ )
@@ -1527,8 +1616,8 @@ void Ut_I2c_DmaLists_Items_ChannelAndRequestPassedToDma( void )
             /* Row is the transmit item */
         }
 
-        i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
-        i2c_Config_t     config     = Ut_I2c_Get_Config();
+        i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+        i2c_Config_t     config     = UtI2c_Get_Config();
 
         dataConfig.TxDma  = (i2c_TxDma_t)txRow->Item;
         dataConfig.RxDma  = (i2c_RxDma_t)rxRow->Item;
@@ -1578,14 +1667,15 @@ void Ut_I2c_Get_DataConfig_NotInitialized_ReturnsError( void )
  * - Dma_Init() twice: TX memory to peripheral with request I2C1_TX and
  *   peripheral address TXDR, RX peripheral to memory with request I2C1_RX and
  *   peripheral address RXDR, configured priorities; 8-bit, normal mode, static
- *   peripheral / incremented memory address; only transfer error callback.
+ *   peripheral / incremented memory address; transfer error callback and transfer
+ *   complete callback (used by the slave beyond the buffer), no half transfer callback.
  * - Transfer error interrupt and channel interrupt enabled for TX, then RX channel.
  * - CR1: TXDMAEN, RXDMAEN and I2C interrupt sources disabled.
  */
 void Ut_I2c_Set_DataConfig_Dma_ChannelsInitialized( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
-    i2c_Config_t           config     = Ut_I2c_Get_Config();
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    i2c_Config_t           config     = UtI2c_Get_Config();
 
     config.DataConfig = &dataConfig;
 
@@ -1593,13 +1683,13 @@ void Ut_I2c_Set_DataConfig_Dma_ChannelsInitialized( void )
     Rcc_Set_PeriphInactive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_IgnoreAndReturn( RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
-    Nvic_Set_PeriphIrq_Handler_StubWithCallback( Ut_I2c_NvicSetHandlerStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
+    Nvic_Set_PeriphIrq_Handler_StubWithCallback( UtI2c_NvicSetHandlerStub );
     Nvic_Set_PeriphIrq_Prio_IgnoreAndReturn( NVIC_REQUEST_OK );
     Nvic_Set_PeriphIrq_Active_IgnoreAndReturn( NVIC_REQUEST_OK );
     Dma_Get_DefaultConfig_IgnoreAndReturn( DMA_REQUEST_OK );
-    Dma_Init_StubWithCallback( Ut_I2c_DmaInitStub );
+    Dma_Init_StubWithCallback( UtI2c_DmaInitStub );
     Dma_Set_TransferInactive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_TransferErrorIrqActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
     Dma_Set_InterruptActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
@@ -1630,7 +1720,7 @@ void Ut_I2c_Set_DataConfig_Dma_ChannelsInitialized( void )
         TEST_ASSERT_EQUAL( DMA_TRANSFER_SIZE_8BIT,    utI2c_DmaConfig[ dirIdx ].MemoryTransferSize );
         TEST_ASSERT_EQUAL( DMA_PERIPH_ADDR_STATIC,    utI2c_DmaConfig[ dirIdx ].PeriphAddrIncrement );
         TEST_ASSERT_EQUAL( DMA_MEMORY_ADDR_INCREMENT, utI2c_DmaConfig[ dirIdx ].MemoryAddrIncrement );
-        TEST_ASSERT_NULL( utI2c_DmaConfig[ dirIdx ].TransferCompleteCallback );
+        TEST_ASSERT_NOT_NULL( utI2c_DmaConfig[ dirIdx ].TransferCompleteCallback );
         TEST_ASSERT_NULL( utI2c_DmaConfig[ dirIdx ].HalfTransferCallback );
         TEST_ASSERT_NOT_NULL( utI2c_DmaConfig[ dirIdx ].TransferErrorCallback );
     }
@@ -1652,13 +1742,13 @@ void Ut_I2c_Set_DataConfig_Dma_ChannelsInitialized( void )
  */
 void Ut_I2c_Set_DataConfig_DmaInitError_ReturnsErrorChannelsReleased( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     i2c_DataConfig_t       readConfig;
 
-    Ut_I2c_Init( NULL );
+    UtI2c_Init( NULL );
 
     utI2c_DmaInitRxState = DMA_REQUEST_ERROR;
-    Dma_Set_InterruptInactive_StubWithCallback( Ut_I2c_DmaIrqOffStub );
+    Dma_Set_InterruptInactive_StubWithCallback( UtI2c_DmaIrqOffStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
 
@@ -1680,23 +1770,23 @@ void Ut_I2c_Set_DataConfig_DmaInitError_ReturnsErrorChannelsReleased( void )
  */
 void Ut_I2c_Dma_ReleaseError_ChannelReusedByNextInit( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaInitCnt );
 
     utI2c_DmaIrqOffState = DMA_REQUEST_ERROR;
-    Dma_Set_InterruptInactive_StubWithCallback( Ut_I2c_DmaIrqOffStub );
+    Dma_Set_InterruptInactive_StubWithCallback( UtI2c_DmaIrqOffStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Deinit( UT_I2C_PERIPH ) );
     TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaIrqOffCnt );
 
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Reset_Mocks();
     utI2c_DmaIrqOffState = DMA_REQUEST_OK;
     Dma_Set_Priority_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_PRIORITY_LOW, DMA_REQUEST_OK );
     Dma_Set_Priority_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_PRIORITY_HIGH, DMA_REQUEST_OK );
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaInitCnt );
 }
 
@@ -1714,10 +1804,10 @@ void Ut_I2c_Dma_ReleaseError_ChannelReusedByNextInit( void )
  */
 void Ut_I2c_Set_XferStart_InvalidRequest_ReturnsErrorWithoutStart( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     i2c_XferRequest_t      request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 1u, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( UT_I2C_PERIPH, NULL ) );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( I2C_PERIPH_CNT, &request ) );
@@ -1752,10 +1842,10 @@ void Ut_I2c_Set_XferStart_InvalidRequest_ReturnsErrorWithoutStart( void )
 void Ut_I2c_Set_XferStart_NotReady_ReturnsErrorWithoutStart( void )
 {
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 1u, .RxData = NULL, .RxSize = 0u };
-    i2c_DataConfig_t        dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_NONE );
+    i2c_DataConfig_t        dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_NONE );
 
     /* Data handling not initialized */
-    Ut_I2c_Init( NULL );
+    UtI2c_Init( NULL );
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
     /* Transfer mode NONE */
@@ -1790,17 +1880,17 @@ void Ut_I2c_Set_XferStart_NotReady_ReturnsErrorWithoutStart( void )
  */
 void Ut_I2c_Set_XferStart_RunningTransfer_SecondRequestRejected( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_INACTIVE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_XferState( UT_I2C_PERIPH, &xferState ) );
     TEST_ASSERT_EQUAL( I2C_FUNCTION_ACTIVE, xferState );
 
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
     TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
     /* Configuration changes are rejected during the transfer */
@@ -1821,14 +1911,14 @@ void Ut_I2c_Set_XferStart_RunningTransfer_SecondRequestRejected( void )
  */
 void Ut_I2c_Set_XferStart_Write_Cr2ProgrammedWithStart( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 3u, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 3u, I2C_CR2_AUTOEND, 0u ), Ut_I2c_Get_Cr2Xfer() );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 3u, I2C_CR2_AUTOEND, 0u ), UtI2c_Get_Cr2Xfer() );
     TEST_ASSERT_EQUAL_HEX32( I2C_CR2_START, UT_I2C_REG->CR2 & I2C_CR2_START );
     TEST_ASSERT_EQUAL_HEX32( I2C_ICR_NACKCF | I2C_ICR_STOPCF | I2C_ICR_BERRCF | I2C_ICR_ARLOCF | I2C_ICR_OVRCF,
                              UT_I2C_REG->ICR & ( I2C_ICR_NACKCF | I2C_ICR_STOPCF | I2C_ICR_BERRCF | I2C_ICR_ARLOCF | I2C_ICR_OVRCF ) );
@@ -1845,14 +1935,14 @@ void Ut_I2c_Set_XferStart_Write_Cr2ProgrammedWithStart( void )
  */
 void Ut_I2c_Set_XferStart_Read_Cr2ReadDirection( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = utI2c_RxBuf, .RxSize = 2u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 2u, I2C_CR2_AUTOEND, I2C_CR2_RD_WRN ), Ut_I2c_Get_Cr2Xfer() );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 2u, I2C_CR2_AUTOEND, I2C_CR2_RD_WRN ), UtI2c_Get_Cr2Xfer() );
 }
 
 
@@ -1866,14 +1956,14 @@ void Ut_I2c_Set_XferStart_Read_Cr2ReadDirection( void )
  */
 void Ut_I2c_Set_XferStart_AddressOnly_ZeroBytesAutoEnd( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 0u, I2C_CR2_AUTOEND, 0u ), Ut_I2c_Get_Cr2Xfer() );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 0u, I2C_CR2_AUTOEND, 0u ), UtI2c_Get_Cr2Xfer() );
 }
 
 
@@ -1887,10 +1977,10 @@ void Ut_I2c_Set_XferStart_AddressOnly_ZeroBytesAutoEnd( void )
  */
 void Ut_I2c_Set_XferStart_10BitAddress_NotShifted( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = 0x2A5u, .TxData = utI2c_TxBuf, .TxSize = 1u, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_AddrMode( UT_I2C_PERIPH, I2C_ADDR_MODE_10BIT ) );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
@@ -1916,14 +2006,14 @@ void Ut_I2c_Set_XferStart_10BitAddress_NotShifted( void )
  */
 void Ut_I2c_Task_PollWrite_BytesWrittenAndCompleteCallback( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_ACTIVE;
     i2c_XferErrorId_t       xferError  = I2C_XFER_ERROR_CNT;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     UT_I2C_REG->ISR = I2C_ISR_TXIS;
     I2c_Task();
@@ -1970,15 +2060,15 @@ void Ut_I2c_Task_PollWrite_BytesWrittenAndCompleteCallback( void )
  */
 void Ut_I2c_Task_PollWriteRead_RepeatedStartAndDataRead( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 1u, .RxData = utI2c_RxBuf, .RxSize = 2u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
     /* Write phase ends without STOP (software end) */
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 1u, 0u, 0u ), Ut_I2c_Get_Cr2Xfer() );
-    Ut_I2c_Set_StartSent();
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 1u, 0u, 0u ), UtI2c_Get_Cr2Xfer() );
+    UtI2c_Set_StartSent();
 
     UT_I2C_REG->ISR = I2C_ISR_TXIS;
     I2c_Task();
@@ -1987,9 +2077,9 @@ void Ut_I2c_Task_PollWriteRead_RepeatedStartAndDataRead( void )
     /* TC: repeated START with read direction */
     UT_I2C_REG->ISR = I2C_ISR_TC;
     I2c_Task();
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 2u, I2C_CR2_AUTOEND, I2C_CR2_RD_WRN ), Ut_I2c_Get_Cr2Xfer() );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 2u, I2C_CR2_AUTOEND, I2C_CR2_RD_WRN ), UtI2c_Get_Cr2Xfer() );
     TEST_ASSERT_EQUAL_HEX32( I2C_CR2_START, UT_I2C_REG->CR2 & I2C_CR2_START );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     UT_I2C_REG->RXDR = 0xA1u;
     UT_I2C_REG->ISR  = I2C_ISR_RXNE;
@@ -2016,21 +2106,21 @@ void Ut_I2c_Task_PollWriteRead_RepeatedStartAndDataRead( void )
  */
 void Ut_I2c_Task_PollLongWrite_ReloadChunks( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = UT_I2C_LONG_SIZE, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
 
     /* First chunk: 255 bytes with reload */
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 255u, I2C_CR2_RELOAD, 0u ), Ut_I2c_Get_Cr2Xfer() );
-    Ut_I2c_Set_StartSent();
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 255u, I2C_CR2_RELOAD, 0u ), UtI2c_Get_Cr2Xfer() );
+    UtI2c_Set_StartSent();
 
     /* TCR: remaining 45 bytes without START, automatic end */
     UT_I2C_REG->ISR = I2C_ISR_TCR;
     I2c_Task();
 
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, UT_I2C_LONG_SIZE - 255u, I2C_CR2_AUTOEND, 0u ), Ut_I2c_Get_Cr2Xfer() );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, UT_I2C_LONG_SIZE - 255u, I2C_CR2_AUTOEND, 0u ), UtI2c_Get_Cr2Xfer() );
     TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->CR2 & I2C_CR2_START );
 }
 
@@ -2049,13 +2139,13 @@ void Ut_I2c_Task_PollLongWrite_ReloadChunks( void )
  */
 void Ut_I2c_Task_PollNack_ErrorCallbackAfterStop( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = NULL, .RxSize = 0u };
     i2c_XferErrorId_t       xferError  = I2C_XFER_ERROR_NONE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     /* NACK: error reported after STOP condition */
     UT_I2C_REG->ISR = I2C_ISR_NACKF;
@@ -2095,14 +2185,14 @@ void Ut_I2c_Task_PollNack_ErrorCallbackAfterStop( void )
  */
 void Ut_I2c_Task_PollBusErrorIgnoredArbitrationLostReported( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_INACTIVE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
     UT_I2C_REG->ICR = 0u;
     UT_I2C_REG->ISR = I2C_ISR_BERR;
     I2c_Task();
@@ -2121,7 +2211,7 @@ void Ut_I2c_Task_PollBusErrorIgnoredArbitrationLostReported( void )
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_ErrorCnt );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
     UT_I2C_REG->ISR = I2C_ISR_ARLO;
     I2c_Task();
     TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_ErrorCnt );
@@ -2142,20 +2232,20 @@ void Ut_I2c_Task_PollBusErrorIgnoredArbitrationLostReported( void )
  */
 void Ut_I2c_Set_XferStop_RunningTransfer_AbortedPeripheralReEnabled( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_ACTIVE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStop( UT_I2C_PERIPH ) );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_XferState( UT_I2C_PERIPH, &xferState ) );
     TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE, xferState );
     TEST_ASSERT_EQUAL_HEX32( I2C_CR1_PE, UT_I2C_REG->CR1 & I2C_CR1_PE );
-    TEST_ASSERT_EQUAL_HEX32( 0u, Ut_I2c_Get_Cr2Xfer() & ~I2C_CR2_ADD10 );
+    TEST_ASSERT_EQUAL_HEX32( 0u, UtI2c_Get_Cr2Xfer() & ~I2C_CR2_ADD10 );
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_ErrorCnt );
 
@@ -2180,27 +2270,27 @@ void Ut_I2c_Set_XferStop_RunningTransfer_AbortedPeripheralReEnabled( void )
  */
 void Ut_I2c_Isr_Write_InterruptsEnabledBytesWrittenAndComplete( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     const uint32_t          itMask     = I2C_CR1_TXIE | I2C_CR1_RXIE | I2C_CR1_NACKIE | I2C_CR1_STOPIE | I2C_CR1_TCIE | I2C_CR1_ERRIE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->CR1 & itMask );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
     TEST_ASSERT_EQUAL_HEX32( itMask, UT_I2C_REG->CR1 & itMask );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
-    Ut_I2c_Call_Isr( I2C_ISR_TXIS );
+    UtI2c_Call_Isr( I2C_ISR_TXIS );
     TEST_ASSERT_EQUAL_HEX32( 0x10u, UT_I2C_REG->TXDR );
-    Ut_I2c_Call_Isr( I2C_ISR_TXIS );
+    UtI2c_Call_Isr( I2C_ISR_TXIS );
     TEST_ASSERT_EQUAL_HEX32( 0x11u, UT_I2C_REG->TXDR );
 
     /* No data are written beyond the request */
-    Ut_I2c_Call_Isr( I2C_ISR_TXIS );
+    UtI2c_Call_Isr( I2C_ISR_TXIS );
     TEST_ASSERT_EQUAL_HEX32( 0x11u, UT_I2C_REG->TXDR );
 
-    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+    UtI2c_Call_Isr( I2C_ISR_STOPF );
 
     TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_CompleteCnt );
     TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->CR1 & itMask );
@@ -2217,20 +2307,20 @@ void Ut_I2c_Isr_Write_InterruptsEnabledBytesWrittenAndComplete( void )
  */
 void Ut_I2c_Isr_Read_DataStoredAndComplete( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = utI2c_RxBuf, .RxSize = 3u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     for( uint32_t byteIdx = 0u; 3u > byteIdx; byteIdx++ )
     {
         UT_I2C_REG->RXDR = 0xC0u + byteIdx;
-        Ut_I2c_Call_Isr( I2C_ISR_RXNE );
+        UtI2c_Call_Isr( I2C_ISR_RXNE );
     }
 
-    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+    UtI2c_Call_Isr( I2C_ISR_STOPF );
 
     TEST_ASSERT_EQUAL_HEX8( 0xC0u, utI2c_RxBuf[ 0u ] );
     TEST_ASSERT_EQUAL_HEX8( 0xC1u, utI2c_RxBuf[ 1u ] );
@@ -2249,14 +2339,14 @@ void Ut_I2c_Isr_Read_DataStoredAndComplete( void )
  */
 void Ut_I2c_Isr_NackAndStopTogether_NackErrorReported( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 1u, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
-    Ut_I2c_Call_Isr( I2C_ISR_NACKF | I2C_ISR_STOPF );
+    UtI2c_Call_Isr( I2C_ISR_NACKF | I2C_ISR_STOPF );
 
     TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_ErrorCnt );
     TEST_ASSERT_EQUAL( I2C_XFER_ERROR_NACK, utI2c_LastError );
@@ -2274,11 +2364,11 @@ void Ut_I2c_Isr_NackAndStopTogether_NackErrorReported( void )
  */
 void Ut_I2c_Isr_NoTransfer_FlagsIgnored( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
-    Ut_I2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_STOPF | I2C_ISR_BERR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_STOPF | I2C_ISR_BERR );
 
     TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->TXDR );
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
@@ -2307,11 +2397,11 @@ void Ut_I2c_Isr_NoTransfer_FlagsIgnored( void )
  */
 void Ut_I2c_Dma_WriteRead_ChannelsArmedStopEndsTransfer( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = utI2c_RxBuf, .RxSize = 3u };
 
-    Ut_I2c_Init( &dataConfig );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( &dataConfig );
+    UtI2c_Reset_Mocks();
 
     Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
     Dma_Set_MemoryAddr_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, (dma_MemoryAddr_t)(uintptr_t)utI2c_TxBuf, DMA_REQUEST_OK );
@@ -2325,18 +2415,18 @@ void Ut_I2c_Dma_WriteRead_ChannelsArmedStopEndsTransfer( void )
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
     TEST_ASSERT_EQUAL_HEX32( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN | UT_I2C_CR1_IT_EVENTS,
                              UT_I2C_REG->CR1 & ( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN | UT_I2C_CR1_IT_ALL ) );
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 2u, 0u, 0u ), Ut_I2c_Get_Cr2Xfer() );
-    Ut_I2c_Set_StartSent();
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 2u, 0u, 0u ), UtI2c_Get_Cr2Xfer() );
+    UtI2c_Set_StartSent();
 
-    Ut_I2c_Call_Isr( I2C_ISR_TC );
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 3u, I2C_CR2_AUTOEND, I2C_CR2_RD_WRN ), Ut_I2c_Get_Cr2Xfer() );
+    UtI2c_Call_Isr( I2C_ISR_TC );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 3u, I2C_CR2_AUTOEND, I2C_CR2_RD_WRN ), UtI2c_Get_Cr2Xfer() );
     TEST_ASSERT_EQUAL_HEX32( I2C_CR2_START, UT_I2C_REG->CR2 & I2C_CR2_START );
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     Dma_Set_TransferInactive_IgnoreAndReturn( DMA_REQUEST_OK );
-    Dma_Get_DataCount_StubWithCallback( Ut_I2c_DmaGetCountStub );
-    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+    Dma_Get_DataCount_StubWithCallback( UtI2c_DmaGetCountStub );
+    UtI2c_Call_Isr( I2C_ISR_STOPF );
 
     TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_CompleteCnt );
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_ErrorCnt );
@@ -2356,19 +2446,19 @@ void Ut_I2c_Dma_WriteRead_ChannelsArmedStopEndsTransfer( void )
  */
 void Ut_I2c_Dma_AddressOnly_NoChannelArmed( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = NULL, .TxSize = 0u, .RxData = NULL, .RxSize = 0u };
 
-    Ut_I2c_Init( &dataConfig );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( &dataConfig );
+    UtI2c_Reset_Mocks();
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
     TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR1_IT_EVENTS, UT_I2C_REG->CR1 & ( I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN | UT_I2C_CR1_IT_ALL ) );
-    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 0u, I2C_CR2_AUTOEND, 0u ), Ut_I2c_Get_Cr2Xfer() );
-    Ut_I2c_Set_StartSent();
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_CR2( UT_I2C_SLAVE_ADDR, 0u, I2C_CR2_AUTOEND, 0u ), UtI2c_Get_Cr2Xfer() );
+    UtI2c_Set_StartSent();
 
     Dma_Set_TransferInactive_IgnoreAndReturn( DMA_REQUEST_OK );
-    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+    UtI2c_Call_Isr( I2C_ISR_STOPF );
 
     TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_CompleteCnt );
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_ErrorCnt );
@@ -2386,17 +2476,17 @@ void Ut_I2c_Dma_AddressOnly_NoChannelArmed( void )
  */
 void Ut_I2c_Dma_StopWithDataRemaining_DmaErrorReported( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_ACTIVE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     utI2c_DmaRemaining = 1u;
-    Ut_I2c_Call_Isr( I2C_ISR_STOPF );
+    UtI2c_Call_Isr( I2C_ISR_STOPF );
 
     TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_CompleteCnt );
     TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_ErrorCnt );
@@ -2418,14 +2508,14 @@ void Ut_I2c_Dma_StopWithDataRemaining_DmaErrorReported( void )
  */
 void Ut_I2c_Dma_TransferError_TransferAborted( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_ACTIVE;
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
-    Ut_I2c_Set_StartSent();
+    UtI2c_Set_StartSent();
 
     TEST_ASSERT_NOT_NULL( utI2c_DmaConfig[ 0u ].TransferErrorCallback );
     utI2c_DmaConfig[ 0u ].TransferErrorCallback();
@@ -2450,12 +2540,12 @@ void Ut_I2c_Dma_TransferError_TransferAborted( void )
  */
 void Ut_I2c_Dma_ChannelArmError_StartRejected( void )
 {
-    const i2c_DataConfig_t  dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t  dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
     const i2c_XferRequest_t request    = { .SlaveAddr = UT_I2C_SLAVE_ADDR, .TxData = utI2c_TxBuf, .TxSize = 2u, .RxData = NULL, .RxSize = 0u };
     i2c_FunctionState_t     xferState  = I2C_FUNCTION_ACTIVE;
 
-    Ut_I2c_Init( &dataConfig );
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Init( &dataConfig );
+    UtI2c_Reset_Mocks();
     Dma_Set_TransferInactive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_MemoryAddr_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, (dma_MemoryAddr_t)(uintptr_t)utI2c_TxBuf, DMA_REQUEST_ERROR );
 
@@ -2482,12 +2572,12 @@ void Ut_I2c_Dma_ChannelArmError_StartRejected( void )
  */
 void Ut_I2c_Dma_Deinit_ChannelsReleased( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
 
-    Ut_I2c_Init( &dataConfig );
+    UtI2c_Init( &dataConfig );
     UT_I2C_REG->CR1 |= I2C_CR1_TXDMAEN | I2C_CR1_RXDMAEN | UT_I2C_CR1_IT_ALL;
 
-    Dma_Set_InterruptInactive_StubWithCallback( Ut_I2c_DmaIrqOffStub );
+    Dma_Set_InterruptInactive_StubWithCallback( UtI2c_DmaIrqOffStub );
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Deinit( UT_I2C_PERIPH ) );
     TEST_ASSERT_EQUAL_UINT32( 2u, utI2c_DmaIrqOffCnt );
@@ -2503,7 +2593,7 @@ void Ut_I2c_Dma_Deinit_ChannelsReleased( void )
 static nvic_IsrCallback_t utI2c_AnyIsr;
 
 /** NVIC handler registration stub of any I2C peripheral - stores the handler */
-static nvic_RequestState_t Ut_I2c_NvicAnyHandlerStub( nvic_PeriphIrqList_t irqId, const nvic_IsrCallback_t irqHandler, int callCnt )
+static nvic_RequestState_t UtI2c_NvicAnyHandlerStub( nvic_PeriphIrqList_t irqId, const nvic_IsrCallback_t irqHandler, int callCnt )
 {
     (void)irqId;
     (void)callCnt;
@@ -2517,7 +2607,7 @@ static nvic_RequestState_t Ut_I2c_NvicAnyHandlerStub( nvic_PeriphIrqList_t irqId
 
 
 /** RCC clock source stub of any I2C peripheral - the kernel clock source is the PCLK1 */
-static rcc_RequestState_t Ut_I2c_RccAnyClkSrcStub( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt )
+static rcc_RequestState_t UtI2c_RccAnyClkSrcStub( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt )
 {
     (void)callCnt;
 
@@ -2528,7 +2618,7 @@ static rcc_RequestState_t Ut_I2c_RccAnyClkSrcStub( rcc_PeriphId_t periphId, rcc_
 
 
 /** RCC clock stub of any I2C peripheral - returns \ref UT_I2C_CLK_HZ */
-static rcc_RequestState_t Ut_I2c_RccAnyClkStub( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt )
+static rcc_RequestState_t UtI2c_RccAnyClkStub( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt )
 {
     (void)periphId;
     (void)callCnt;
@@ -2557,20 +2647,20 @@ static rcc_RequestState_t Ut_I2c_RccAnyClkStub( rcc_PeriphId_t periphId, rcc_Fre
  */
 void Ut_I2c_Isr_AllPeriphs_EndWithDsb( void )
 {
-    const i2c_DataConfig_t dataConfig = Ut_I2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    const i2c_DataConfig_t dataConfig = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
 
     for( uint32_t periphIdx = 0u; I2C_PERIPH_CNT > periphIdx; periphIdx++ )
     {
-        i2c_Config_t config = Ut_I2c_Get_Config();
+        i2c_Config_t config = UtI2c_Get_Config();
 
         config.PeriphId   = (i2c_PeriphId_t)periphIdx;
         config.DataConfig = &dataConfig;
 
-        Ut_I2c_Reset_Mocks();
-        Ut_I2c_Ignore_PeriphMocks();
-        Nvic_Set_PeriphIrq_Handler_StubWithCallback( Ut_I2c_NvicAnyHandlerStub );
-        Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccAnyClkSrcStub );
-        Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccAnyClkStub );
+        UtI2c_Reset_Mocks();
+        UtI2c_Ignore_PeriphMocks();
+        Nvic_Set_PeriphIrq_Handler_StubWithCallback( UtI2c_NvicAnyHandlerStub );
+        Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccAnyClkSrcStub );
+        Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccAnyClkStub );
         utI2c_AnyIsr = NULL;
 
         TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
@@ -2585,12 +2675,719 @@ void Ut_I2c_Isr_AllPeriphs_EndWithDsb( void )
     }
 }
 
+/* ================================ SLAVE =================================== */
+
+/**
+ * \brief   I2c_Init() of a slave writes own addresses and clock stretching (addresses disabled).
+ *
+ * \details Initializes I2C1 as slave: own address 1 0x2C (7-bit), own address 2 0x3A with
+ *          mask of 2 bits, general call, clock stretching disabled; then own address 1
+ *          0x2B7 (10-bit).
+ *
+ * \par Expected results
+ * - 7-bit: OAR1 = 0x2C << 1 (OA1EN = 0), OAR2 = 0x3A << 1 | OA2MSK 2 (OA2EN = 0), NOSTRETCH set,
+ *   GCEN = 0 (set by listen start).
+ * - 10-bit: OAR1 = OA1MODE | 0x2B7, NOSTRETCH cleared.
+ */
+void Ut_I2c_Init_Slave_OwnAddrRegistersWritten( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    slaveConfig.OwnAddr2State = I2C_FUNCTION_ACTIVE;
+    slaveConfig.OwnAddr2      = UT_I2C_OWN_ADDR2;
+    slaveConfig.OwnAddr2Mask  = I2C_OWN_ADDR2_MASK_2BIT;
+    slaveConfig.GeneralCall   = I2C_FUNCTION_ACTIVE;
+    slaveConfig.ClockStretch  = I2C_CLOCK_STRETCH_DISABLED;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+
+    TEST_ASSERT_EQUAL_HEX32( (uint32_t)UT_I2C_OWN_ADDR << 1u, UT_I2C_REG->OAR1 );
+    TEST_ASSERT_EQUAL_HEX32( ( (uint32_t)UT_I2C_OWN_ADDR2 << 1u ) | LL_I2C_OWNADDRESS2_MASK02, UT_I2C_REG->OAR2 );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_NOSTRETCH, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_GCEN, UT_I2C_REG->CR1 );
+
+    slaveConfig             = UtI2c_Get_SlaveConfig();
+    slaveConfig.OwnAddr     = UT_I2C_OWN_ADDR10;
+    slaveConfig.OwnAddrMode = I2C_ADDR_MODE_10BIT;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+
+    TEST_ASSERT_EQUAL_HEX32( I2C_OAR1_OA1MODE | UT_I2C_OWN_ADDR10, UT_I2C_REG->OAR1 );
+    TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->OAR2 & I2C_OAR2_OA2EN );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_NOSTRETCH, UT_I2C_REG->CR1 );
+}
+
+
+/**
+ * \brief   I2c_Init() rejects invalid slave configurations.
+ *
+ * \details Slave role with: reserved own address 0x00 / 0x07 / 0x78 (7-bit), 10-bit address
+ *          0x400, invalid own address mode, reserved own address 2, invalid mask, clock
+ *          stretch and general call state; invalid role.
+ *
+ * \par Expected results
+ * - I2C_REQUEST_ERROR in all cases; the lowest / highest valid 7-bit address 0x08 / 0x77 and
+ *   the highest 10-bit address 0x3FF OK.
+ */
+void Ut_I2c_Init_Slave_InvalidConfig_ReturnsError( void )
+{
+    i2c_Config_t config = UtI2c_Get_Config();
+
+    UtI2c_Ignore_PeriphMocks();
+
+    config.Role = I2C_ROLE_SLAVE;
+
+    config.SlaveConfig.OwnAddr = UT_I2C_ADDR_GENERAL_CALL;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+    config.SlaveConfig.OwnAddr = UT_I2C_ADDR_RESERVED_LAST;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+    config.SlaveConfig.OwnAddr = UT_I2C_ADDR_RESERVED_10BIT;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+    config.SlaveConfig.OwnAddr = UT_I2C_ADDR_FIRST_VALID;
+    UtI2c_Emulate_PeriphReset();
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
+    config.SlaveConfig.OwnAddr = UT_I2C_ADDR_LAST_VALID;
+    UtI2c_Emulate_PeriphReset();
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
+
+    config.SlaveConfig.OwnAddrMode = I2C_ADDR_MODE_10BIT;
+    config.SlaveConfig.OwnAddr     = UT_I2C_ADDR10_OVER_MAX;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+    config.SlaveConfig.OwnAddr     = UT_I2C_ADDR10_MAX;
+    UtI2c_Emulate_PeriphReset();
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
+
+    config.SlaveConfig.OwnAddrMode = I2C_ADDR_MODE_CNT;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+
+    config.SlaveConfig               = UtI2c_Get_SlaveConfig();
+    config.SlaveConfig.OwnAddr2State = I2C_FUNCTION_ACTIVE;
+    config.SlaveConfig.OwnAddr2      = UT_I2C_ADDR2_RESERVED;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+
+    config.SlaveConfig              = UtI2c_Get_SlaveConfig();
+    config.SlaveConfig.OwnAddr2Mask = I2C_OWN_ADDR2_MASK_CNT;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+
+    config.SlaveConfig              = UtI2c_Get_SlaveConfig();
+    config.SlaveConfig.ClockStretch = I2C_CLOCK_STRETCH_CNT;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+
+    config.SlaveConfig             = UtI2c_Get_SlaveConfig();
+    config.SlaveConfig.GeneralCall = (i2c_FunctionState_t)( (uint32_t)I2C_FUNCTION_ACTIVE + 1u );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+
+    config.SlaveConfig = UtI2c_Get_SlaveConfig();
+    config.Role        = I2C_ROLE_CNT;
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Init( &config ) );
+}
+
+
+/**
+ * \brief   Listen start / stop of an ISR slave enables / disables own addresses and interrupts.
+ *
+ * \details Slave (ISR) with own address 2 and general call; listen start, state read, listen
+ *          stop, state read, second listen stop.
+ *
+ * \par Expected results
+ * - Start: OA1EN, OA2EN, GCEN set; ADDRIE, NACKIE, STOPIE, ERRIE, TXIE, RXIE set; ACTIVE.
+ * - Stop: OA1EN, OA2EN, GCEN and the interrupt enables cleared; INACTIVE; second stop OK.
+ */
+void Ut_I2c_Set_ListenStartStop_Isr_OwnAddrAndIrqsSwitched( void )
+{
+    i2c_DataConfig_t    dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t   slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_FunctionState_t listenState = I2C_FUNCTION_INACTIVE;
+
+    slaveConfig.OwnAddr2State = I2C_FUNCTION_ACTIVE;
+    slaveConfig.OwnAddr2      = UT_I2C_OWN_ADDR2;
+    slaveConfig.GeneralCall   = I2C_FUNCTION_ACTIVE;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    TEST_ASSERT_BITS_HIGH( I2C_OAR1_OA1EN, UT_I2C_REG->OAR1 );
+    TEST_ASSERT_BITS_HIGH( I2C_OAR2_OA2EN, UT_I2C_REG->OAR2 );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_GCEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_HIGH( UT_I2C_SLAVE_ISR_IRQS, UT_I2C_REG->CR1 );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_ListenState( UT_I2C_PERIPH, &listenState ) );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_ACTIVE, listenState );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_ListenStop( UT_I2C_PERIPH ) );
+
+    TEST_ASSERT_BITS_LOW( I2C_OAR1_OA1EN, UT_I2C_REG->OAR1 );
+    TEST_ASSERT_BITS_LOW( I2C_OAR2_OA2EN, UT_I2C_REG->OAR2 );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_GCEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_LOW( UT_I2C_SLAVE_ISR_IRQS, UT_I2C_REG->CR1 );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_ListenState( UT_I2C_PERIPH, &listenState ) );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE, listenState );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_ListenStop( UT_I2C_PERIPH ) );
+}
+
+
+/**
+ * \brief   Listen start and slave services reject invalid requests.
+ *
+ * \details Master role: listen start, slave buffer, slave result; slave role: mode NONE, NULL
+ *          buffer, buffer size without buffer, invalid peripheral, NULL pointers, master
+ *          transfer; while listening: second start, data handling change, invalid buffer.
+ *
+ * \par Expected results
+ * - I2C_REQUEST_ERROR in all cases; the first listen start and a valid buffer change OK.
+ */
+void Ut_I2c_Set_ListenStart_InvalidRequests_ReturnsError( void )
+{
+    i2c_DataConfig_t        dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_DataConfig_t        noneConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_NONE );
+    i2c_SlaveConfig_t       slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_SlaveResult_t       result;
+    const i2c_SlaveBuffer_t buffer      = { utI2c_SlaveRx,
+                                            UT_I2C_SLAVE_BUF_SIZE,
+                                            utI2c_SlaveTx,
+                                            UT_I2C_SLAVE_BUF_SIZE };
+    const i2c_SlaveBuffer_t noRxBuf     = { NULL, 1u, utI2c_SlaveTx, UT_I2C_SLAVE_BUF_SIZE };
+    const i2c_SlaveBuffer_t noTxBuf     = { utI2c_SlaveRx, UT_I2C_SLAVE_BUF_SIZE, NULL, 1u };
+    const i2c_XferRequest_t request     = { UT_I2C_SLAVE_ADDR, utI2c_TxBuf, 1u, NULL, 0u };
+
+    UtI2c_Init( &dataConfig );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( UT_I2C_PERIPH, &buffer ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_SlaveBuffer( UT_I2C_PERIPH, &buffer ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Get_SlaveResult( UT_I2C_PERIPH, &result ) );
+
+    UtI2c_Init_Slave( &noneConfig, &slaveConfig );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( UT_I2C_PERIPH, &buffer ) );
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( UT_I2C_PERIPH, NULL ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( UT_I2C_PERIPH, &noRxBuf ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( UT_I2C_PERIPH, &noTxBuf ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( I2C_PERIPH_CNT, &buffer ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Get_SlaveResult( UT_I2C_PERIPH, NULL ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Get_ListenState( UT_I2C_PERIPH, NULL ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStop( I2C_PERIPH_CNT ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_XferStart( UT_I2C_PERIPH, &request ) );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK,    I2c_Set_ListenStart( UT_I2C_PERIPH, &buffer ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_ListenStart( UT_I2C_PERIPH, &buffer ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_DataConfig( UT_I2C_PERIPH, &dataConfig ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_ERROR, I2c_Set_SlaveBuffer( UT_I2C_PERIPH, &noRxBuf ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK,    I2c_Set_SlaveBuffer( UT_I2C_PERIPH, &buffer ) );
+}
+
+
+/**
+ * \brief   ISR slave receives the bytes of a master write.
+ *
+ * \details Address match (write, 0x2C), 2 received bytes, STOP.
+ *
+ * \par Expected results
+ * - Address callback (write, 0x2C), ADDRCF written; bytes stored in RxData.
+ * - Complete callback: RxCnt 2, TxCnt 0, nothing beyond the buffers; transfer state INACTIVE.
+ */
+void Ut_I2c_Slave_IsrWrite_BytesReceived( void )
+{
+    i2c_DataConfig_t    dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t   slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_FunctionState_t xferState   = I2C_FUNCTION_ACTIVE;
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UT_I2C_REG->ICR = 0u;
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_SlaveAddrCnt );
+    TEST_ASSERT_EQUAL( I2C_SLAVE_DIR_WRITE, utI2c_SlaveDir );
+    TEST_ASSERT_EQUAL_HEX16( UT_I2C_OWN_ADDR, utI2c_SlaveAddr );
+    TEST_ASSERT_BITS_HIGH( I2C_ICR_ADDRCF, UT_I2C_REG->ICR );
+
+    UT_I2C_REG->RXDR = UT_I2C_RX_BYTE_1;
+    UtI2c_Call_Isr( I2C_ISR_RXNE );
+    UT_I2C_REG->RXDR = UT_I2C_RX_BYTE_2;
+    UtI2c_Call_Isr( I2C_ISR_RXNE );
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+
+    TEST_ASSERT_EQUAL_HEX8( UT_I2C_RX_BYTE_1, utI2c_SlaveRx[ 0u ] );
+    TEST_ASSERT_EQUAL_HEX8( UT_I2C_RX_BYTE_2, utI2c_SlaveRx[ 1u ] );
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL_UINT16( UT_I2C_CNT_TWO, utI2c_SlaveResult.RxCnt );
+    TEST_ASSERT_EQUAL_UINT16( 0u, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_INACTIVE, utI2c_SlaveResult.RxBeyondBuffer );
+    TEST_ASSERT_EQUAL( I2C_FLAG_INACTIVE, utI2c_SlaveResult.TxBeyondBuffer );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_XferState( UT_I2C_PERIPH, &xferState ) );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE, xferState );
+}
+
+
+/**
+ * \brief   ISR slave transmits, the byte written in advance and not read is not counted.
+ *
+ * \details Address match (read) and TXIS in the same call, 3x TXIS, NACK, STOP with TXDR full.
+ *
+ * \par Expected results
+ * - No byte written in the call of the address match.
+ * - TXDR gets TxData[ 0 ] .. [ 2 ]; result TxCnt 2 (third byte not read by the master).
+ */
+void Ut_I2c_Slave_IsrRead_PrefetchedByteNotCounted( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UT_I2C_REG->TXDR = 0u;
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 1u, UT_I2C_OWN_ADDR ) | I2C_ISR_TXIS );
+    TEST_ASSERT_EQUAL( I2C_SLAVE_DIR_READ, utI2c_SlaveDir );
+    TEST_ASSERT_EQUAL_HEX32( 0u, UT_I2C_REG->TXDR );
+
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( utI2c_SlaveTx[ 0u ], UT_I2C_REG->TXDR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( utI2c_SlaveTx[ UT_I2C_CNT_TWO ], UT_I2C_REG->TXDR );
+
+    UtI2c_Call_Isr( I2C_ISR_NACKF | I2C_ISR_DIR );
+    UtI2c_Slave_Event( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL_UINT16( UT_I2C_CNT_TWO, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_INACTIVE, utI2c_SlaveResult.TxBeyondBuffer );
+}
+
+
+/**
+ * \brief   ISR slave answers a read beyond the transmit buffer with the fill byte.
+ *
+ * \details Transmit buffer of 1 byte, fill byte 0xA5: 3x TXIS, STOP with TXDR full; then the
+ *          master reads exactly the buffer (2x TXIS - second is a written fill byte not read).
+ *
+ * \par Expected results
+ * - TXDR: TxData[ 0 ], 0xA5, 0xA5; result TxCnt 1, TxBeyondBuffer ACTIVE.
+ * - Exact read: TxCnt 1, TxBeyondBuffer INACTIVE.
+ */
+void Ut_I2c_Slave_IsrReadBeyondBuffer_FillByteSent( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    slaveConfig.FillByte = UT_I2C_FILL_BYTE;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, 1u );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 1u, UT_I2C_OWN_ADDR ) );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( utI2c_SlaveTx[ 0u ], UT_I2C_REG->TXDR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_FILL_BYTE, UT_I2C_REG->TXDR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    UtI2c_Slave_Event( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT16( 1u, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_ACTIVE, utI2c_SlaveResult.TxBeyondBuffer );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 1u, UT_I2C_OWN_ADDR ) );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    UtI2c_Slave_Event( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( UT_I2C_CNT_TWO, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL_UINT16( 1u, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_INACTIVE, utI2c_SlaveResult.TxBeyondBuffer );
+}
+
+
+/**
+ * \brief   Bytes written beyond the receive buffer are discarded and reported.
+ *
+ * \details Receive buffer of 1 byte, 3 received bytes, STOP.
+ *
+ * \par Expected results
+ * - RxData[ 0 ] = first byte, RxData[ 1 ] not written; RxCnt 1, RxBeyondBuffer ACTIVE.
+ */
+void Ut_I2c_Slave_IsrWriteBeyondBuffer_BytesDiscarded( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( 1u, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    for( uint32_t byteIdx = 0u; UT_I2C_CNT_THREE > byteIdx; byteIdx++ )
+    {
+        UT_I2C_REG->RXDR = UT_I2C_RX_BASE + byteIdx;
+        UtI2c_Call_Isr( I2C_ISR_RXNE );
+    }
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+
+    TEST_ASSERT_EQUAL_HEX8( UT_I2C_RX_BASE, utI2c_SlaveRx[ 0u ] );
+    TEST_ASSERT_EQUAL_HEX8( 0u, utI2c_SlaveRx[ 1u ] );
+    TEST_ASSERT_EQUAL_UINT16( 1u, utI2c_SlaveResult.RxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_ACTIVE, utI2c_SlaveResult.RxBeyondBuffer );
+}
+
+
+/**
+ * \brief   Register device pattern - the address callback of the read phase selects the
+ *          transmit buffer after the register address of the write phase (repeated START).
+ *
+ * \details Address match write, register address 3 received, address match read (repeated
+ *          START, no STOP), 2x TXIS, NACK, STOP with TXDR full.
+ *
+ * \par Expected results
+ * - Two address callbacks, TXDR = Tx[ 3 ] then Tx[ 4 ]; one complete callback with RxCnt 1,
+ *   TxCnt 1; I2c_Get_SlaveResult() equals the callback result.
+ */
+void Ut_I2c_Slave_IsrRegisterRead_BufferSelectedInCallback( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_SlaveResult_t result;
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+    utI2c_SlaveRegTx = utI2c_SlaveTx;
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    UT_I2C_REG->RXDR = UT_I2C_CNT_THREE;
+    UtI2c_Call_Isr( I2C_ISR_RXNE );
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 1u, UT_I2C_OWN_ADDR ) );
+    TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_SlaveDoneCnt );
+
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( utI2c_SlaveTx[ UT_I2C_CNT_THREE ], UT_I2C_REG->TXDR );
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( utI2c_SlaveTx[ UT_I2C_CNT_FOUR ], UT_I2C_REG->TXDR );
+    UtI2c_Call_Isr( I2C_ISR_NACKF | I2C_ISR_DIR );
+    UtI2c_Slave_Event( I2C_ISR_STOPF );
+
+    TEST_ASSERT_EQUAL_UINT32( UT_I2C_CNT_TWO, utI2c_SlaveAddrCnt );
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL_UINT16( 1u, utI2c_SlaveResult.RxCnt );
+    TEST_ASSERT_EQUAL_UINT16( 1u, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_SlaveResult( UT_I2C_PERIPH, &result ) );
+    TEST_ASSERT_EQUAL_UINT16( 1u, result.RxCnt );
+    TEST_ASSERT_EQUAL_UINT16( 1u, result.TxCnt );
+    TEST_ASSERT_EQUAL_HEX16( UT_I2C_OWN_ADDR, result.MatchedAddr );
+}
+
+
+/**
+ * \brief   Matched address of a 10-bit slave and of the general call.
+ *
+ * \details 10-bit own address 0x2B7: address code 0x7A (header 11110 + bits 9:8); general call
+ *          address code 0x00 of a 7-bit slave.
+ *
+ * \par Expected results
+ * - Matched address 0x2B7, then 0x00.
+ */
+void Ut_I2c_Slave_AddrMatch_10BitAndGeneralCall_AddressDecoded( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    slaveConfig.OwnAddr     = UT_I2C_OWN_ADDR10;
+    slaveConfig.OwnAddrMode = I2C_ADDR_MODE_10BIT;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u,
+                                     UT_I2C_ADDR_RESERVED_10BIT | ( UT_I2C_OWN_ADDR10 >> UT_I2C_ADDR10_HIGH_SHIFT ) ) );
+    TEST_ASSERT_EQUAL_HEX16( UT_I2C_OWN_ADDR10, utI2c_SlaveAddr );
+
+    slaveConfig             = UtI2c_Get_SlaveConfig();
+    slaveConfig.GeneralCall = I2C_FUNCTION_ACTIVE;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, I2C_SLAVE_ADDR_GENERAL_CALL ) );
+    TEST_ASSERT_EQUAL_HEX16( I2C_SLAVE_ADDR_GENERAL_CALL, utI2c_SlaveAddr );
+}
+
+
+/**
+ * \brief   Slave errors end the transfer without result, the slave keeps listening.
+ *
+ * \details Address match, BERR; address match, ARLO; address match, OVR; STOP after the error.
+ *
+ * \par Expected results
+ * - Error callback with BUS, ARBITRATION_LOST, OVERRUN; no complete callback (STOP after the
+ *   error ignored); listen state ACTIVE.
+ */
+void Ut_I2c_Slave_Errors_TransferEndedListenKept( void )
+{
+    i2c_DataConfig_t    dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t   slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_FunctionState_t listenState = I2C_FUNCTION_INACTIVE;
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    UtI2c_Call_Isr( I2C_ISR_BERR );
+    TEST_ASSERT_EQUAL( I2C_XFER_ERROR_BUS, utI2c_LastError );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    UtI2c_Call_Isr( I2C_ISR_ARLO );
+    TEST_ASSERT_EQUAL( I2C_XFER_ERROR_ARBITRATION_LOST, utI2c_LastError );
+
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    UtI2c_Call_Isr( I2C_ISR_OVR );
+    TEST_ASSERT_EQUAL( I2C_XFER_ERROR_OVERRUN, utI2c_LastError );
+
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+
+    TEST_ASSERT_EQUAL_UINT32( UT_I2C_CNT_THREE, utI2c_ErrorCnt );
+    TEST_ASSERT_EQUAL_UINT32( 0u, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_ListenState( UT_I2C_PERIPH, &listenState ) );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_ACTIVE, listenState );
+}
+
+
+/**
+ * \brief   Polling slave is processed by I2c_Task().
+ *
+ * \details Slave in POLL mode: listen start (no interrupt enables), address match (write), one
+ *          received byte and STOP - every event processed by I2c_Task(); listen stop and one
+ *          more address match.
+ *
+ * \par Expected results
+ * - No I2C interrupt enabled; byte received, complete callback with RxCnt 1.
+ * - After listen stop I2c_Task() does not process the slave (no further address callback).
+ */
+void Ut_I2c_Slave_PollWrite_ProcessedByTask( void )
+{
+    i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_POLL );
+    i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+    TEST_ASSERT_BITS_LOW( UT_I2C_SLAVE_ISR_IRQS, UT_I2C_REG->CR1 );
+
+    UT_I2C_REG->ISR = UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR );
+    I2c_Task();
+    UT_I2C_REG->RXDR = UT_I2C_RX_BYTE_3;
+    UT_I2C_REG->ISR  = I2C_ISR_RXNE;
+    I2c_Task();
+    UT_I2C_REG->ISR = I2C_ISR_STOPF | I2C_ISR_TXE;
+    I2c_Task();
+
+    TEST_ASSERT_EQUAL_HEX8( UT_I2C_RX_BYTE_3, utI2c_SlaveRx[ 0u ] );
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL_UINT16( 1u, utI2c_SlaveResult.RxCnt );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_ListenStop( UT_I2C_PERIPH ) );
+    UT_I2C_REG->ISR = UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR );
+    I2c_Task();
+    TEST_ASSERT_EQUAL_UINT32( 1u, utI2c_SlaveAddrCnt );
+}
+
+
+/**
+ * \brief   DMA slave read: channel armed with the transmit buffer, count from the remaining data
+ *          count, transfer complete switches to the interrupt (fill byte).
+ *
+ * \details Slave (DMA): listen start, address match (read) - TX channel armed; STOP with
+ *          remaining 3 of 8 bytes; address match (read) again, DMA transfer complete, TXIS, STOP.
+ *
+ * \par Expected results
+ * - Listen: ADDRIE, NACKIE, STOPIE, ERRIE set, TXIE / RXIE not set; the transfer complete
+ *   handler is registered for both channels.
+ * - Phase: TX channel (DMA1 channel 6) disabled, memory address TxData, data count 8, enabled,
+ *   transfer complete interrupt enabled, TXDMAEN set.
+ * - First result TxCnt 5 (DMA without FIFO - bytes written to TXDR); TXDMAEN stopped, transfer
+ *   complete interrupt disabled at the end of the phase.
+ * - Transfer complete: TXDMAEN cleared, TXIE set; TXIS writes the fill byte; result TxCnt 8,
+ *   TxBeyondBuffer ACTIVE; TXIE cleared at the end of the phase.
+ */
+void Ut_I2c_Slave_DmaRead_CountAndFillByte( void )
+{
+    const i2c_DataConfig_t dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    i2c_SlaveConfig_t      slaveConfig = UtI2c_Get_SlaveConfig();
+
+    slaveConfig.FillByte = UT_I2C_FILL_BYTE;
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    TEST_ASSERT_BITS_HIGH( UT_I2C_SLAVE_DMA_IRQS, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXIE | I2C_CR1_RXIE, UT_I2C_REG->CR1 );
+    TEST_ASSERT_NOT_NULL( utI2c_DmaConfig[ 0u ].TransferCompleteCallback );
+    TEST_ASSERT_NOT_NULL( utI2c_DmaConfig[ 1u ].TransferCompleteCallback );
+
+    UtI2c_Reset_Mocks();
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_MemoryAddr_ExpectAndReturn( DMA_PERIPH_1,
+                                        DMA_CHANNEL_6,
+                                        (dma_MemoryAddr_t)(uintptr_t)utI2c_SlaveTx,
+                                        DMA_REQUEST_OK );
+    Dma_Set_DataCount_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, UT_I2C_SLAVE_BUF_SIZE, DMA_REQUEST_OK );
+    Dma_Set_TransferActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 1u, UT_I2C_OWN_ADDR ) );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Get_DataCount_StubWithCallback( UtI2c_DmaGetCountStub );
+    utI2c_DmaRemaining = UT_I2C_CNT_THREE;
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+    TEST_ASSERT_EQUAL_UINT16( UT_I2C_CNT_FIVE, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_MemoryAddr_ExpectAndReturn( DMA_PERIPH_1,
+                                        DMA_CHANNEL_6,
+                                        (dma_MemoryAddr_t)(uintptr_t)utI2c_SlaveTx,
+                                        DMA_REQUEST_OK );
+    Dma_Set_DataCount_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, UT_I2C_SLAVE_BUF_SIZE, DMA_REQUEST_OK );
+    Dma_Set_TransferActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 1u, UT_I2C_OWN_ADDR ) );
+
+    utI2c_DmaConfig[ 0u ].TransferCompleteCallback();
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXDMAEN, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_TXIE, UT_I2C_REG->CR1 );
+
+    UtI2c_Call_Isr( I2C_ISR_TXIS | I2C_ISR_DIR );
+    TEST_ASSERT_EQUAL_HEX32( UT_I2C_FILL_BYTE, UT_I2C_REG->TXDR );
+
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+
+    TEST_ASSERT_EQUAL_UINT32( UT_I2C_CNT_TWO, utI2c_SlaveDoneCnt );
+    TEST_ASSERT_EQUAL_UINT16( UT_I2C_SLAVE_BUF_SIZE, utI2c_SlaveResult.TxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_ACTIVE, utI2c_SlaveResult.TxBeyondBuffer );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_TXIE, UT_I2C_REG->CR1 );
+}
+
+
+/**
+ * \brief   DMA slave write: RX channel armed, empty buffer handled by the interrupt; a DMA
+ *          transfer complete without slave transfer is ignored.
+ *
+ * \details Slave (DMA) write phase with receive buffer 8 (STOP with remaining 5); listen with
+ *          empty receive buffer (RXIE enabled at the address match, byte discarded); DMA
+ *          transfer complete of the RX channel while no transfer runs.
+ *
+ * \par Expected results
+ * - RX channel (DMA1 channel 7) disabled, memory address RxData, data count 8, enabled,
+ *   transfer complete interrupt enabled, RXDMAEN set; result RxCnt 3.
+ * - Empty buffer: no DMA call, RXIE set, RxCnt 0, RxBeyondBuffer ACTIVE.
+ * - Transfer complete without transfer: RXDMAEN / RXIE stay cleared.
+ */
+void Ut_I2c_Slave_DmaWrite_CountAndEmptyBuffer( void )
+{
+    const i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Reset_Mocks();
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    Dma_Set_MemoryAddr_ExpectAndReturn( DMA_PERIPH_1,
+                                        DMA_CHANNEL_7,
+                                        (dma_MemoryAddr_t)(uintptr_t)utI2c_SlaveRx,
+                                        DMA_REQUEST_OK );
+    Dma_Set_DataCount_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, UT_I2C_SLAVE_BUF_SIZE, DMA_REQUEST_OK );
+    Dma_Set_TransferActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqActive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    Dma_Get_DataCount_StubWithCallback( UtI2c_DmaGetCountStub );
+    utI2c_DmaRemaining = UT_I2C_CNT_FIVE;
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+    TEST_ASSERT_EQUAL_UINT16( UT_I2C_CNT_THREE, utI2c_SlaveResult.RxCnt );
+
+    UtI2c_Reset_Mocks();
+    UtI2c_Ignore_PeriphMocks();
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_ListenStop( UT_I2C_PERIPH ) );
+    UtI2c_Start_Listen( 0u, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Reset_Mocks();
+    UtI2c_Call_Isr( UT_I2C_ADDR_ISR( 0u, UT_I2C_OWN_ADDR ) );
+    TEST_ASSERT_BITS_HIGH( I2C_CR1_RXIE, UT_I2C_REG->CR1 );
+    TEST_ASSERT_BITS_LOW( I2C_CR1_RXDMAEN, UT_I2C_REG->CR1 );
+    UT_I2C_REG->RXDR = UT_I2C_RX_BYTE_4;
+    UtI2c_Call_Isr( I2C_ISR_RXNE );
+
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    UtI2c_Call_Isr( I2C_ISR_STOPF | I2C_ISR_TXE );
+    TEST_ASSERT_EQUAL_UINT16( 0u, utI2c_SlaveResult.RxCnt );
+    TEST_ASSERT_EQUAL( I2C_FLAG_ACTIVE, utI2c_SlaveResult.RxBeyondBuffer );
+
+    utI2c_DmaConfig[ 1u ].TransferCompleteCallback();
+    TEST_ASSERT_BITS_LOW( I2C_CR1_RXDMAEN | I2C_CR1_RXIE, UT_I2C_REG->CR1 );
+}
+
+
+/**
+ * \brief   Listen stop of a DMA slave disables the DMA channels and their transfer complete
+ *          interrupts.
+ *
+ * \details Slave (DMA) listens, I2c_Set_ListenStop().
+ *
+ * \par Expected results
+ * - I2C_REQUEST_OK, listen state INACTIVE, both DMA channels disabled, the transfer complete
+ *   interrupt of both channels disabled (TX channel first), no I2C interrupt source enabled.
+ */
+void Ut_I2c_Slave_DmaListenStop_ChannelsAndCompleteIrqsDisabled( void )
+{
+    const i2c_DataConfig_t  dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_DMA );
+    const i2c_SlaveConfig_t slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_FunctionState_t     listenState = I2C_FUNCTION_ACTIVE;
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Reset_Mocks();
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_TransferInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_6, DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_ExpectAndReturn( DMA_PERIPH_1, DMA_CHANNEL_7, DMA_REQUEST_OK );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_ListenStop( UT_I2C_PERIPH ) );
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_ListenState( UT_I2C_PERIPH, &listenState ) );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE, listenState );
+    TEST_ASSERT_BITS_LOW( UT_I2C_CR1_IT_ALL | UT_I2C_SLAVE_DMA_IRQS, UT_I2C_REG->CR1 );
+}
+
+
+/**
+ * \brief   Deinit of a listening slave disables the own addresses.
+ *
+ * \details Slave (ISR) listens, I2c_Deinit().
+ *
+ * \par Expected results
+ * - I2C_REQUEST_OK, listen state INACTIVE, OA1EN cleared.
+ */
+void Ut_I2c_Deinit_ListeningSlave_OwnAddrDisabled( void )
+{
+    i2c_DataConfig_t    dataConfig  = UtI2c_Get_DataConfig( I2C_XFER_MODE_ISR );
+    i2c_SlaveConfig_t   slaveConfig = UtI2c_Get_SlaveConfig();
+    i2c_FunctionState_t listenState = I2C_FUNCTION_ACTIVE;
+
+    UtI2c_Init_Slave( &dataConfig, &slaveConfig );
+    UtI2c_Start_Listen( UT_I2C_SLAVE_BUF_SIZE, UT_I2C_SLAVE_BUF_SIZE );
+
+    UtI2c_Ignore_PeriphMocks();
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Deinit( UT_I2C_PERIPH ) );
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Get_ListenState( UT_I2C_PERIPH, &listenState ) );
+    TEST_ASSERT_EQUAL( I2C_FUNCTION_INACTIVE, listenState );
+    TEST_ASSERT_BITS_LOW( I2C_OAR1_OA1EN, UT_I2C_REG->OAR1 );
+}
+
 /* ========================== LOCAL FUNCTIONS =============================== */
 
 /**
  * \brief NVIC handler registration stub - stores ISR of the I2C (event and error line).
  */
-static nvic_RequestState_t Ut_I2c_NvicSetHandlerStub( nvic_PeriphIrqList_t irqId, const nvic_IsrCallback_t irqHandler, int callCnt )
+static nvic_RequestState_t UtI2c_NvicSetHandlerStub( nvic_PeriphIrqList_t irqId, const nvic_IsrCallback_t irqHandler, int callCnt )
 {
     (void)callCnt;
 
@@ -2607,7 +3404,7 @@ static nvic_RequestState_t Ut_I2c_NvicSetHandlerStub( nvic_PeriphIrqList_t irqId
 /**
  * \brief RCC clock source stub - I2C1 kernel clock source is \ref utI2c_ClkSrc.
  */
-static rcc_RequestState_t Ut_I2c_RccGetClkSrcStub( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt )
+static rcc_RequestState_t UtI2c_RccGetClkSrcStub( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt )
 {
     (void)callCnt;
 
@@ -2623,7 +3420,7 @@ static rcc_RequestState_t Ut_I2c_RccGetClkSrcStub( rcc_PeriphId_t periphId, rcc_
  * \brief RCC clock stub - returns \ref utI2c_PclkHz for PCLK1 (kernel clock source and
  *        APB1 clock) and \ref utI2c_HsiHz for HSI16.
  */
-static rcc_RequestState_t Ut_I2c_RccGetClkStub( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt )
+static rcc_RequestState_t UtI2c_RccGetClkStub( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt )
 {
     (void)callCnt;
 
@@ -2646,7 +3443,7 @@ static rcc_RequestState_t Ut_I2c_RccGetClkStub( rcc_PeriphId_t periphId, rcc_Fre
  * \brief RCC clock source stub of any I2C peripheral - the kernel clock source of the peripheral
  *        is its APB1 clock (the identification asked for is returned).
  */
-static rcc_RequestState_t Ut_I2c_RccGetAnyClkSrcStub( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt )
+static rcc_RequestState_t UtI2c_RccGetAnyClkSrcStub( rcc_PeriphId_t periphId, rcc_PeriphId_t * const periphClkSrc, int callCnt )
 {
     (void)callCnt;
 
@@ -2659,7 +3456,7 @@ static rcc_RequestState_t Ut_I2c_RccGetAnyClkSrcStub( rcc_PeriphId_t periphId, r
 /**
  * \brief RCC clock stub of any I2C peripheral - \ref utI2c_PclkHz for every clock.
  */
-static rcc_RequestState_t Ut_I2c_RccGetAnyClkStub( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt )
+static rcc_RequestState_t UtI2c_RccGetAnyClkStub( rcc_PeriphId_t periphId, rcc_FreqHz_t * const periphClk, int callCnt )
 {
     (void)periphId;
     (void)callCnt;
@@ -2674,7 +3471,7 @@ static rcc_RequestState_t Ut_I2c_RccGetAnyClkStub( rcc_PeriphId_t periphId, rcc_
  * \brief RCC reset stub of the I2C1 with HSI kernel clock - emulates the peripheral
  *        reset (I2C registers cleared).
  */
-static rcc_RequestState_t Ut_I2c_RccResetHsiStub( rcc_PeriphId_t periphId, int callCnt )
+static rcc_RequestState_t UtI2c_RccResetHsiStub( rcc_PeriphId_t periphId, int callCnt )
 {
     (void)callCnt;
 
@@ -2691,7 +3488,7 @@ static rcc_RequestState_t Ut_I2c_RccResetHsiStub( rcc_PeriphId_t periphId, int c
 /**
  * \brief GPIO initialization stub - stores the pin configuration.
  */
-static gpio_RequestState_t Ut_I2c_GpioInitStub( gpio_Config_t *gpioConfig, int callCnt )
+static gpio_RequestState_t UtI2c_GpioInitStub( gpio_Config_t *gpioConfig, int callCnt )
 {
     (void)callCnt;
 
@@ -2707,7 +3504,7 @@ static gpio_RequestState_t Ut_I2c_GpioInitStub( gpio_Config_t *gpioConfig, int c
  * \brief DMA channel initialization stub - stores the configuration (TX at index 0, RX at
  *        index 1), the RX channel returns \ref utI2c_DmaInitRxState.
  */
-static dma_RequestState_t Ut_I2c_DmaInitStub( dma_ConfigStruct_t * const dmaConfig, int callCnt )
+static dma_RequestState_t UtI2c_DmaInitStub( dma_ConfigStruct_t * const dmaConfig, int callCnt )
 {
     dma_RequestState_t retState = DMA_REQUEST_OK;
 
@@ -2734,7 +3531,7 @@ static dma_RequestState_t Ut_I2c_DmaInitStub( dma_ConfigStruct_t * const dmaConf
 /**
  * \brief DMA count of data stub - returns \ref utI2c_DmaRemaining.
  */
-static dma_RequestState_t Ut_I2c_DmaGetCountStub( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, dma_DataCount_t * const dataCount, int callCnt )
+static dma_RequestState_t UtI2c_DmaGetCountStub( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, dma_DataCount_t * const dataCount, int callCnt )
 {
     (void)dmaBus;
     (void)dmaChannel;
@@ -2750,7 +3547,7 @@ static dma_RequestState_t Ut_I2c_DmaGetCountStub( dma_PeriphId_t dmaBus, dma_Cha
  * \brief Dma_Set_InterruptInactive() stub (DMA channel released) - counts the calls and
  *        returns \ref utI2c_DmaIrqOffState.
  */
-static dma_RequestState_t Ut_I2c_DmaIrqOffStub( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, int callCnt )
+static dma_RequestState_t UtI2c_DmaIrqOffStub( dma_PeriphId_t dmaBus, dma_ChannelId_t dmaChannel, int callCnt )
 {
     (void)dmaBus;
     (void)dmaChannel;
@@ -2766,30 +3563,32 @@ static dma_RequestState_t Ut_I2c_DmaIrqOffStub( dma_PeriphId_t dmaBus, dma_Chann
  * \brief Ignores all calls of RCC / NVIC / GPIO / DMA functions used by peripheral
  *        configuration and data handling.
  */
-static void Ut_I2c_Ignore_PeriphMocks( void )
+static void UtI2c_Ignore_PeriphMocks( void )
 {
     Rcc_Set_PeriphActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_PeriphInactive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetActive_IgnoreAndReturn( RCC_REQUEST_OK );
     Rcc_Set_ResetInactive_IgnoreAndReturn( RCC_REQUEST_OK );
-    Rcc_Get_PeriphClkSrc_StubWithCallback( Ut_I2c_RccGetClkSrcStub );
-    Rcc_Get_PeriphClk_StubWithCallback( Ut_I2c_RccGetClkStub );
+    Rcc_Get_PeriphClkSrc_StubWithCallback( UtI2c_RccGetClkSrcStub );
+    Rcc_Get_PeriphClk_StubWithCallback( UtI2c_RccGetClkStub );
     Gpio_Init_IgnoreAndReturn( GPIO_REQUEST_OK );
-    Nvic_Set_PeriphIrq_Handler_StubWithCallback( Ut_I2c_NvicSetHandlerStub );
+    Nvic_Set_PeriphIrq_Handler_StubWithCallback( UtI2c_NvicSetHandlerStub );
     Nvic_Set_PeriphIrq_Prio_IgnoreAndReturn( NVIC_REQUEST_OK );
     Nvic_Set_PeriphIrq_Active_IgnoreAndReturn( NVIC_REQUEST_OK );
     Nvic_Set_PeriphIrq_Inactive_IgnoreAndReturn( NVIC_REQUEST_OK );
     Dma_Get_DefaultConfig_IgnoreAndReturn( DMA_REQUEST_OK );
-    Dma_Init_StubWithCallback( Ut_I2c_DmaInitStub );
+    Dma_Init_StubWithCallback( UtI2c_DmaInitStub );
     Dma_Set_TransferErrorIrqActive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_TransferErrorIrqInactive_IgnoreAndReturn( DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqActive_IgnoreAndReturn( DMA_REQUEST_OK );
+    Dma_Set_TransferCompleteIrqInactive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_InterruptActive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_InterruptInactive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_TransferActive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_TransferInactive_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_MemoryAddr_IgnoreAndReturn( DMA_REQUEST_OK );
     Dma_Set_DataCount_IgnoreAndReturn( DMA_REQUEST_OK );
-    Dma_Get_DataCount_StubWithCallback( Ut_I2c_DmaGetCountStub );
+    Dma_Get_DataCount_StubWithCallback( UtI2c_DmaGetCountStub );
 }
 
 
@@ -2797,20 +3596,20 @@ static void Ut_I2c_Ignore_PeriphMocks( void )
  * \brief Releases data handling of the previous test (static module context) and
  *        re-initializes the mocks.
  */
-static void Ut_I2c_Release( void )
+static void UtI2c_Release( void )
 {
-    Ut_I2c_Ignore_PeriphMocks();
+    UtI2c_Ignore_PeriphMocks();
 
     (void)I2c_Deinit( UT_I2C_PERIPH );
 
-    Ut_I2c_Reset_Mocks();
+    UtI2c_Reset_Mocks();
 }
 
 
 /**
  * \brief Removes all expectations and ignores of the mocks.
  */
-static void Ut_I2c_Reset_Mocks( void )
+static void UtI2c_Reset_Mocks( void )
 {
     MockRcc_Port_Destroy();
     MockNvic_Port_Destroy();
@@ -2826,7 +3625,7 @@ static void Ut_I2c_Reset_Mocks( void )
 /**
  * \brief Returns default configuration of I2C1 without pins and data handling.
  */
-static i2c_Config_t Ut_I2c_Get_Config( void )
+static i2c_Config_t UtI2c_Get_Config( void )
 {
     i2c_Config_t config;
 
@@ -2842,7 +3641,7 @@ static i2c_Config_t Ut_I2c_Get_Config( void )
  *
  * \param xferMode [in]: Data transfer mode
  */
-static i2c_DataConfig_t Ut_I2c_Get_DataConfig( i2c_XferMode_t xferMode )
+static i2c_DataConfig_t UtI2c_Get_DataConfig( i2c_XferMode_t xferMode )
 {
     i2c_DataConfig_t dataConfig;
 
@@ -2852,8 +3651,8 @@ static i2c_DataConfig_t Ut_I2c_Get_DataConfig( i2c_XferMode_t xferMode )
     dataConfig.RxDma                = UT_I2C_DMA_RX;
     dataConfig.RxDmaPriority        = I2C_DMA_PRIORITY_HIGH;
     dataConfig.IrqPriority          = UT_I2C_PRIO;
-    dataConfig.XferCompleteCallback = Ut_I2c_XferCompleteCallback;
-    dataConfig.ErrorCallback        = Ut_I2c_ErrorCallback;
+    dataConfig.XferCompleteCallback = UtI2c_XferCompleteCallback;
+    dataConfig.ErrorCallback        = UtI2c_ErrorCallback;
 
     return ( dataConfig );
 }
@@ -2864,13 +3663,13 @@ static i2c_DataConfig_t Ut_I2c_Get_DataConfig( i2c_XferMode_t xferMode )
  *
  * \param dataConfig [in]: Data handling configuration (NULL - not initialized)
  */
-static void Ut_I2c_Init( const i2c_DataConfig_t * const dataConfig )
+static void UtI2c_Init( const i2c_DataConfig_t * const dataConfig )
 {
-    i2c_Config_t config = Ut_I2c_Get_Config();
+    i2c_Config_t config = UtI2c_Get_Config();
 
     config.DataConfig = dataConfig;
 
-    Ut_I2c_Ignore_PeriphMocks();
+    UtI2c_Ignore_PeriphMocks();
 
     TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
 }
@@ -2881,7 +3680,7 @@ static void Ut_I2c_Init( const i2c_DataConfig_t * const dataConfig )
  *
  * \param isrFlags [in]: Value of the ISR register
  */
-static void Ut_I2c_Call_Isr( uint32_t isrFlags )
+static void UtI2c_Call_Isr( uint32_t isrFlags )
 {
     TEST_ASSERT_NOT_NULL_MESSAGE( utI2c_Isr, "I2C ISR not registered" );
 
@@ -2893,7 +3692,7 @@ static void Ut_I2c_Call_Isr( uint32_t isrFlags )
 /**
  * \brief Emulates hardware clearing of CR2.START after the address phase.
  */
-static void Ut_I2c_Set_StartSent( void )
+static void UtI2c_Set_StartSent( void )
 {
     UT_I2C_REG->CR2 &= ~I2C_CR2_START;
 }
@@ -2902,14 +3701,14 @@ static void Ut_I2c_Set_StartSent( void )
 /**
  * \brief Returns transfer fields of CR2 (SADD, ADD10, NBYTES, RELOAD, AUTOEND, RD_WRN).
  */
-static uint32_t Ut_I2c_Get_Cr2Xfer( void )
+static uint32_t UtI2c_Get_Cr2Xfer( void )
 {
     return ( UT_I2C_REG->CR2 & ( I2C_CR2_SADD | I2C_CR2_ADD10 | I2C_CR2_NBYTES | I2C_CR2_RELOAD | I2C_CR2_AUTOEND | I2C_CR2_RD_WRN ) );
 }
 
 
 /** \brief Transfer complete callback */
-static void Ut_I2c_XferCompleteCallback( void )
+static void UtI2c_XferCompleteCallback( void )
 {
     utI2c_CompleteCnt++;
 }
@@ -2920,8 +3719,136 @@ static void Ut_I2c_XferCompleteCallback( void )
  *
  * \param errorId [in]: Error identification
  */
-static void Ut_I2c_ErrorCallback( i2c_XferErrorId_t errorId )
+static void UtI2c_ErrorCallback( i2c_XferErrorId_t errorId )
 {
     utI2c_LastError = errorId;
     utI2c_ErrorCnt++;
+}
+
+
+/**
+ * \brief Returns the slave configuration of the tests: own address 1 0x2C (7-bit).
+ */
+static i2c_SlaveConfig_t UtI2c_Get_SlaveConfig( void )
+{
+    i2c_Config_t config = UtI2c_Get_Config();
+
+    config.SlaveConfig.OwnAddr = UT_I2C_OWN_ADDR;
+
+    return ( config.SlaveConfig );
+}
+
+
+/**
+ * \brief Initializes I2C1 (100 kHz) as slave with ignored RCC / NVIC calls.
+ *
+ * \param dataConfig  [in]: Data handling configuration (callbacks of the slave are added)
+ * \param slaveConfig [in]: Slave configuration
+ */
+static void UtI2c_Init_Slave( const i2c_DataConfig_t * const dataConfig,
+                              const i2c_SlaveConfig_t * const slaveConfig )
+{
+    i2c_Config_t     config    = UtI2c_Get_Config();
+    i2c_DataConfig_t slaveData = *dataConfig;
+
+    slaveData.SlaveAddrCallback         = UtI2c_SlaveAddrCallback;
+    slaveData.SlaveXferCompleteCallback = UtI2c_SlaveDoneCallback;
+
+    config.Role        = I2C_ROLE_SLAVE;
+    config.SlaveConfig = *slaveConfig;
+    config.DataConfig  = &slaveData;
+
+    UtI2c_Ignore_PeriphMocks();
+    UtI2c_Emulate_PeriphReset();
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Init( &config ) );
+}
+
+
+/**
+ * \brief Fills the slave buffers (receive buffer 0, transmit buffer 0x60 + index) and starts
+ *        listening.
+ *
+ * \param rxSize [in]: Size of the receive buffer
+ * \param txSize [in]: Size of the transmit buffer
+ */
+static void UtI2c_Start_Listen( i2c_DataCnt_t rxSize, i2c_DataCnt_t txSize )
+{
+    const i2c_SlaveBuffer_t buffer = { utI2c_SlaveRx, rxSize, utI2c_SlaveTx, txSize };
+
+    for( uint32_t byteIdx = 0u; UT_I2C_SLAVE_BUF_SIZE > byteIdx; byteIdx++ )
+    {
+        utI2c_SlaveRx[ byteIdx ] = 0u;
+        utI2c_SlaveTx[ byteIdx ] = (i2c_Data_t)( UT_I2C_TX_BASE + byteIdx );
+    }
+
+    TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_ListenStart( UT_I2C_PERIPH, &buffer ) );
+}
+
+
+/**
+ * \brief Calls the I2C ISR with the flags and TXDR not empty (TXE = 0) - a byte written in
+ *        advance was not read by the master.
+ *
+ * \param isrFlags [in]: Value of the ISR register (TXE is cleared)
+ */
+static void UtI2c_Slave_Event( uint32_t isrFlags )
+{
+    UtI2c_Call_Isr( isrFlags & ~I2C_ISR_TXE );
+}
+
+
+/**
+ * \brief Slave address callback - stores the match, in the register pattern the transmit buffer
+ *        of a read phase starts at the register received in the write phase.
+ *
+ * \param slaveDir    [in]: Direction of the phase
+ * \param matchedAddr [in]: Matched address
+ */
+static void UtI2c_SlaveAddrCallback( i2c_SlaveDir_t slaveDir, i2c_SlaveAddr_t matchedAddr )
+{
+    utI2c_SlaveAddrCnt++;
+    utI2c_SlaveDir  = slaveDir;
+    utI2c_SlaveAddr = matchedAddr;
+
+    if( ( NULL               != utI2c_SlaveRegTx ) &&
+        ( I2C_SLAVE_DIR_READ == slaveDir         )    )
+    {
+        const i2c_DataCnt_t     regAddr = utI2c_SlaveRx[ 0u ];
+        const i2c_SlaveBuffer_t buffer  = { utI2c_SlaveRx,
+                                            UT_I2C_SLAVE_BUF_SIZE,
+                                            &utI2c_SlaveRegTx[ regAddr ],
+                                            UT_I2C_SLAVE_BUF_SIZE - regAddr };
+
+        TEST_ASSERT_EQUAL( I2C_REQUEST_OK, I2c_Set_SlaveBuffer( UT_I2C_PERIPH, &buffer ) );
+    }
+    else
+    {
+        /* Buffers are kept */
+    }
+}
+
+
+/**
+ * \brief Slave transfer complete callback.
+ *
+ * \param slaveResult [in]: Result of the slave transfer
+ */
+static void UtI2c_SlaveDoneCallback( const i2c_SlaveResult_t * const slaveResult )
+{
+    utI2c_SlaveResult = *slaveResult;
+    utI2c_SlaveDoneCnt++;
+}
+
+
+/**
+ * \brief Emulates the RCC reset of I2C1 before a further I2c_Init() of the test (the RCC mock does
+ *        not reset the emulated registers - PE, own addresses and CR2 stay set).
+ */
+static void UtI2c_Emulate_PeriphReset( void )
+{
+    UT_I2C_REG->CR1  = 0u;
+    UT_I2C_REG->CR2  = 0u;
+    UT_I2C_REG->OAR1 = 0u;
+    UT_I2C_REG->OAR2 = 0u;
 }

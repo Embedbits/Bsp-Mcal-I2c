@@ -4,10 +4,10 @@
 # IntegrationTesting_Generate() in "IntegrationTest" build
 # (see EmBi_Platform/CMake/IntegrationTesting/README.md).
 #
-# Master I2C1 is the module under test. Slave I2C3 emulates a register device in the
-# interrupt of the test set (LL). Wiring (without it the slave tests are ignored):
-# Nucleo-64 / Nucleo-144 PB8 (D15) - PC0, PB9 (D14) - PC1; Nucleo-32 PA9 (D1) - PA7 (A6),
-# PA10 (D0) - PB4 (D12); Nucleo-64-P of the Nucleo-32 groups PA9 - PC0, PA10 - PC1.
+# Master I2C1 and the slave I2C2 (the module in slave mode) of the same MCU. Wiring (board fixture
+# I2C_LOOP of the inventory, without it the master + slave tests are ignored):
+# NUCLEO-L4R5ZI PB8 (SCL) - PB10, PB9 (SDA) - PB11, external pull-ups 4.7 kOhm; boards without
+# a known wiring have the slave tests ignored.
 #
 # The test set is independent - target interface (entry point, initialization,
 # fault handlers, system reset) is implemented by ItTarget_I2c.c and
@@ -25,7 +25,7 @@ IntegrationTesting_Add_Test(
     TEST_SOURCE     ItTest_I2c.c
     SOURCES         ItTarget_I2c.c      # Target interface of the test set
     LINK_LIBS       StartUp_Lib         # Startup code (calls BspMain)
-                    Nvic_Lib            # Fault handlers, system reset (ItTarget), slave interrupt
+                    Nvic_Lib            # Fault handlers, system reset (ItTarget)
                     I2c_Lib             # Module under test
                     Rcc_Lib             # Kernel clock source verification
     TIMEOUT         90
