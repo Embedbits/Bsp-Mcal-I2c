@@ -19,6 +19,13 @@
  * \note  The DMA stream stays enabled after a normal mode transfer - it is disabled before it
  *        is armed again and by the stop of the transfer.
  *
+ * Slave (listen): the stream of the direction of the address match is armed by the phase start
+ * (I2c_Dma_SlavePhase) with the buffer of the slave. When the stream finished the buffer, its
+ * transfer complete interrupt switches the phase to the I2C interrupt (fill bytes are sent /
+ * further bytes are discarded). At the end of the phase the count of moved bytes is read from the
+ * stream (data count register; direct mode, no FIFO). The transfer complete interrupt is used only
+ * by the slave.
+ *
  * DMA callbacks have no parameter, so every peripheral has its own set of handlers generated
  * by I2C_DMA_DEFINE_HANDLERS().
  *
@@ -49,8 +56,10 @@ typedef enum
 /** \brief GPDMA handlers of one peripheral (registered in GPDMA module) */
 typedef struct
 {
-    gpdma_IsrErrCallback *TxErrorIsr; /**< Transmission transfer error handler */
-    gpdma_IsrErrCallback *RxErrorIsr; /**< Reception transfer error handler    */
+    gpdma_IsrErrCallback *TxErrorIsr;    /**< Transmission transfer error handler    */
+    gpdma_IsrErrCallback *RxErrorIsr;    /**< Reception transfer error handler       */
+    gpdma_IsrCallback    *TxCompleteIsr; /**< Transmission transfer complete handler */
+    gpdma_IsrCallback    *RxCompleteIsr; /**< Reception transfer complete handler    */
 }   i2c_DmaIsrConfig_t;
 
 
@@ -89,8 +98,10 @@ typedef enum
  * \param name [in]: Peripheral name used in handler names (e.g. I2c1)
  */
 #define I2C_DMA_DECLARE_HANDLERS( name )                                                \
-    static void I2c_Dma_##name##_TxError ( gpdma_ErrorMaskId_t errorMask );             \
-    static void I2c_Dma_##name##_RxError ( gpdma_ErrorMaskId_t errorMask )
+    static void I2c_Dma_##name##_TxError    ( gpdma_ErrorMaskId_t errorMask );          \
+    static void I2c_Dma_##name##_RxError    ( gpdma_ErrorMaskId_t errorMask );          \
+    static void I2c_Dma_##name##_TxComplete ( void );                                   \
+    static void I2c_Dma_##name##_RxComplete ( void )
 
 /**
  * \brief Defines GPDMA handlers of one I2C peripheral - every handler forwards the event with the
@@ -101,7 +112,9 @@ typedef enum
  */
 #define I2C_DMA_DEFINE_HANDLERS( name, periphId )                                                          \
     static void I2c_Dma_##name##_TxError( gpdma_ErrorMaskId_t errorMask ) { (void)I2c_Dma_XferError( periphId, errorMask ); } \
-    static void I2c_Dma_##name##_RxError( gpdma_ErrorMaskId_t errorMask ) { (void)I2c_Dma_XferError( periphId, errorMask ); }
+    static void I2c_Dma_##name##_RxError( gpdma_ErrorMaskId_t errorMask ) { (void)I2c_Dma_XferError( periphId, errorMask ); } \
+    static void I2c_Dma_##name##_TxComplete( void ) { (void)I2c_Dma_XferComplete( periphId, I2C_DMA_DIR_TX ); }             \
+    static void I2c_Dma_##name##_RxComplete( void ) { (void)I2c_Dma_XferComplete( periphId, I2C_DMA_DIR_RX ); }
 
 /**
  * \brief Handler table entry of one I2C peripheral
@@ -109,17 +122,25 @@ typedef enum
  * \param name [in]: Peripheral name used in handler names (e.g. I2c1)
  */
 #define I2C_DMA_ISR_CONFIG( name )                                                      \
-    { .TxErrorIsr = I2c_Dma_##name##_TxError, .RxErrorIsr = I2c_Dma_##name##_RxError }
+    { .TxErrorIsr    = I2c_Dma_##name##_TxError,    .RxErrorIsr    = I2c_Dma_##name##_RxError,    \
+      .TxCompleteIsr = I2c_Dma_##name##_TxComplete, .RxCompleteIsr = I2c_Dma_##name##_RxComplete }
 
 /* ======================== FORWARD DECLARATIONS ============================ */
 
 static i2c_RequestState_t I2c_Dma_Set_ChannelInit ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 static i2c_RequestState_t I2c_Dma_Set_ChannelOff  ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
-static i2c_RequestState_t I2c_Dma_Set_Transfer    ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
+static i2c_RequestState_t I2c_Dma_Set_Transfer    ( i2c_PeriphId_t periphId,
+                                                    i2c_DmaDir_t dmaDir,
+                                                    const i2c_Data_t * const memData,
+                                                    i2c_DataCnt_t dataCnt );
 static i2c_RequestState_t I2c_Dma_Set_Request     ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, i2c_FunctionState_t reqState );
 static i2c_RequestState_t I2c_Dma_Set_Stop        ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 static i2c_RequestState_t I2c_Dma_Get_Remaining   ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, gpdma_BlockSize_t * const remaining );
+static i2c_RequestState_t I2c_Dma_Get_FifoLevel   ( i2c_PeriphId_t periphId,
+                                                    i2c_DmaDir_t dmaDir,
+                                                    gpdma_FifoLevel_t * const fifoLevel );
 static i2c_RequestState_t I2c_Dma_XferError       ( i2c_PeriphId_t periphId, gpdma_ErrorMaskId_t errorMask );
+static i2c_RequestState_t I2c_Dma_XferComplete    ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 
 #ifdef I2C1
 I2C_DMA_DECLARE_HANDLERS( I2c1 );
@@ -327,7 +348,10 @@ i2c_RequestState_t I2c_Dma_XferStart( i2c_PeriphId_t periphId )
     if( ( I2C_REQUEST_OK == retState               ) &&
         ( 0u              < xferCtx->Request.TxSize )    )
     {
-        retState = I2c_Dma_Set_Transfer( periphId, I2C_DMA_DIR_TX );
+        retState = I2c_Dma_Set_Transfer( periphId,
+                                         I2C_DMA_DIR_TX,
+                                         xferCtx->Request.TxData,
+                                         xferCtx->Request.TxSize );
 
         if( I2C_REQUEST_OK == retState )
         {
@@ -346,7 +370,10 @@ i2c_RequestState_t I2c_Dma_XferStart( i2c_PeriphId_t periphId )
     if( ( I2C_REQUEST_OK == retState               ) &&
         ( 0u              < xferCtx->Request.RxSize )    )
     {
-        retState = I2c_Dma_Set_Transfer( periphId, I2C_DMA_DIR_RX );
+        retState = I2c_Dma_Set_Transfer( periphId,
+                                         I2C_DMA_DIR_RX,
+                                         xferCtx->Request.RxData,
+                                         xferCtx->Request.RxSize );
 
         if( I2C_REQUEST_OK == retState )
         {
@@ -459,6 +486,206 @@ i2c_RequestState_t I2c_Dma_Check_Done( i2c_PeriphId_t periphId )
     return ( retState );
 }
 
+
+/**
+ * \brief Starts / stops listening of the slave in DMA mode - slave sequencing events are enabled /
+ *        GPDMA channels, I2C DMA requests and all I2C interrupt sources are disabled
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param listenState [in]: Listen started / stopped, value from \ref i2c_FunctionState_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Dma_Listen( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_FUNCTION_ACTIVE == listenState )
+    {
+        retState = I2c_Isr_Set_ItActive( periphId, I2C_ISR_IT_SLAVE );
+    }
+    else
+    {
+        retState = I2c_Dma_XferStop( periphId );
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Starts the slave phase of the direction of the address match - the GPDMA channel of the
+ *        direction is armed with the buffer of the slave and the I2C DMA request is enabled. An
+ *        empty buffer is handled by the I2C interrupt (fill bytes / discarded bytes).
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Dma_SlavePhase( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t  retState = I2C_REQUEST_ERROR;
+    i2c_XferContext_t * xferCtx  = I2C_NULL_PTR;
+
+    retState = I2c_Get_XferContext( periphId, &xferCtx );
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        const i2c_SlaveBuffer_t slaveBuffer = xferCtx->SlaveBuffer;
+        i2c_DmaDir_t            dmaDir      = I2C_DMA_DIR_RX;
+        const i2c_Data_t *      memData     = slaveBuffer.RxData;
+        i2c_DataCnt_t           dataCnt     = slaveBuffer.RxSize;
+        i2c_IsrItMask_t         dataIt      = (i2c_IsrItMask_t)I2C_ISR_IT_RX;
+
+        if( I2C_SLAVE_DIR_READ == xferCtx->SlaveDir )
+        {
+            dmaDir  = I2C_DMA_DIR_TX;
+            memData = slaveBuffer.TxData;
+            dataCnt = slaveBuffer.TxSize;
+            dataIt  = (i2c_IsrItMask_t)I2C_ISR_IT_TX;
+        }
+        else
+        {
+            /* Master writes - reception */
+        }
+
+        if( 0u < dataCnt )
+        {
+            retState = I2c_Dma_Set_Transfer( periphId, dmaDir, memData, dataCnt );
+
+            if( I2C_REQUEST_OK == retState )
+            {
+                retState = I2c_Dma_Set_Request( periphId, dmaDir, I2C_FUNCTION_ACTIVE );
+            }
+            else
+            {
+                /* GPDMA channel could not be armed */
+            }
+        }
+        else
+        {
+            /* Empty buffer - every byte is beyond the buffer */
+            retState = I2c_Isr_Set_ItActive( periphId, dataIt );
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Ends the slave phase in DMA mode - the count of moved bytes is taken from the GPDMA
+ *        channel (unless the channel finished the buffer), the channel, the I2C DMA request and
+ *        the data register interrupts are disabled
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Dma_SlavePhaseEnd( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t  retState  = I2C_REQUEST_ERROR;
+    I2C_TypeDef *       periphReg = I2C_NULL_PTR;
+    i2c_XferContext_t * xferCtx   = I2C_NULL_PTR;
+
+    retState = I2c_Get_PeriphReg( periphId, &periphReg );
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        retState = I2c_Get_XferContext( periphId, &xferCtx );
+    }
+    else
+    {
+        /* Invalid peripheral identification */
+    }
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        gpdma_BlockSize_t remaining = 0u;
+        gpdma_FifoLevel_t fifoLevel = 0u;
+        i2c_DmaDir_t      dmaDir    = I2C_DMA_DIR_RX;
+        uint32_t          dmaReqEn  = LL_I2C_IsEnabledDMAReq_RX( periphReg );
+        gpdma_BlockSize_t blockSize = (gpdma_BlockSize_t)xferCtx->SlaveBuffer.RxSize;
+
+        if( I2C_SLAVE_DIR_READ == xferCtx->SlaveDir )
+        {
+            dmaDir    = I2C_DMA_DIR_TX;
+            dmaReqEn  = LL_I2C_IsEnabledDMAReq_TX( periphReg );
+            blockSize = (gpdma_BlockSize_t)xferCtx->SlaveBuffer.TxSize;
+        }
+        else
+        {
+            /* Master wrote - reception */
+        }
+
+        if( 0u != dmaReqEn )
+        {
+            /* GPDMA channel did not finish the buffer - moved bytes are counted */
+            retState = I2c_Dma_Get_Remaining( periphId, dmaDir, &remaining );
+
+            if( ( I2C_REQUEST_OK == retState ) &&
+                ( I2C_DMA_DIR_TX == dmaDir   )    )
+            {
+                /* Bytes read ahead into the FIFO of the channel were not written to TXDR */
+                retState = I2c_Dma_Get_FifoLevel( periphId, dmaDir, &fifoLevel );
+            }
+            else
+            {
+                /* Reception - the FIFO is written to the memory by the channel */
+            }
+
+            if( ( I2C_REQUEST_OK == retState                                  ) &&
+                ( I2C_DMA_DIR_TX == dmaDir                                    ) &&
+                ( blockSize      >= ( remaining + (gpdma_BlockSize_t)fifoLevel ) ) )
+            {
+                xferCtx->TxIdx = (i2c_DataCnt_t)( blockSize - remaining - (gpdma_BlockSize_t)fifoLevel );
+            }
+            else if( ( I2C_REQUEST_OK == retState  ) &&
+                     ( I2C_DMA_DIR_RX == dmaDir    ) &&
+                     ( blockSize      >= remaining )    )
+            {
+                xferCtx->RxIdx = (i2c_DataCnt_t)( blockSize - remaining );
+            }
+            else
+            {
+                /* Remaining size is not available */
+                retState = I2C_REQUEST_ERROR;
+            }
+        }
+        else
+        {
+            /* Buffer finished by GPDMA (index set by the transfer complete) or empty buffer */
+        }
+
+        const i2c_RequestState_t stopState = I2c_Dma_Set_Stop( periphId, dmaDir );
+        const i2c_RequestState_t itState   = I2c_Isr_Set_ItInactive( periphId, I2C_ISR_IT_DATA );
+
+        if( ( I2C_REQUEST_OK == retState  ) &&
+            ( I2C_REQUEST_OK == stopState ) &&
+            ( I2C_REQUEST_OK == itState   )    )
+        {
+            retState = I2C_REQUEST_OK;
+        }
+        else
+        {
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
 /* =========================== LOCAL FUNCTIONS ============================== */
 
 /**
@@ -539,7 +766,6 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelInit( i2c_PeriphId_t periphId, i2c_
         dmaConfig.XferList            = &i2c_DmaXferList[ periphId ][ dmaDir ];
         dmaConfig.TransferLockState   = GPDMA_TRANSFER_LIST_LOCKED;
         dmaConfig.ErrorMask           = I2C_DMA_ERROR_MASK;
-        dmaConfig.TransferCompleteIsr = GPDMA_NULL_PTR;
         dmaConfig.HalfTransferIsr     = GPDMA_NULL_PTR;
 
         if( I2C_DMA_DIR_TX == dmaDir )
@@ -552,6 +778,7 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelInit( i2c_PeriphId_t periphId, i2c_
             xferConfig.DestinationAddrMode = GPDMA_ADDR_STATIC;
 
             dmaConfig.ErrorIsr             = isrConfig->TxErrorIsr;
+            dmaConfig.TransferCompleteIsr  = isrConfig->TxCompleteIsr;
         }
         else
         {
@@ -567,6 +794,7 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelInit( i2c_PeriphId_t periphId, i2c_
             xferConfig.DestinationAddrMode = GPDMA_ADDR_INCREMENT;
 
             dmaConfig.ErrorIsr             = isrConfig->RxErrorIsr;
+            dmaConfig.TransferCompleteIsr  = isrConfig->RxCompleteIsr;
         }
 
         dmaConfig.PeriphId    = (gpdma_PeriphId_t)dmaPeriph;
@@ -691,56 +919,57 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelOff( i2c_PeriphId_t periphId, i2c_D
 /**
  * \brief Arms the GPDMA channel of one direction (block size, memory address, enable)
  *
- * - Transmission: TxSize bytes from TxData
- * - Reception:    RxSize bytes into RxData
+ * - Transmission: dataCnt bytes from memData
+ * - Reception:    dataCnt bytes into memData
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  * \param dmaDir   [in]: Data transfer direction
+ * \param memData  [in]: Memory buffer of the direction (request of the master, buffer of the slave)
+ * \param dataCnt  [in]: Count of bytes (not zero)
  *
  * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
  *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
  */
-static i2c_RequestState_t I2c_Dma_Set_Transfer( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir )
+static i2c_RequestState_t I2c_Dma_Set_Transfer( i2c_PeriphId_t periphId,
+                                                i2c_DmaDir_t dmaDir,
+                                                const i2c_Data_t * const memData,
+                                                i2c_DataCnt_t dataCnt )
 {
-    i2c_RequestState_t  retState = I2C_REQUEST_ERROR;
-    i2c_XferContext_t * xferCtx  = I2C_NULL_PTR;
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
 
-    retState = I2c_Get_XferContext( periphId, &xferCtx );
-
-    if( ( I2C_REQUEST_OK      == retState                                          ) &&
-        ( I2C_DMA_DIR_CNT      > dmaDir                                            ) &&
-        ( I2C_FUNCTION_ACTIVE == i2c_DmaChannelState[ periphId ][ dmaDir ].Initialized ) )
+    if( ( I2C_PERIPH_CNT       > periphId                                              ) &&
+        ( I2C_DMA_DIR_CNT      > dmaDir                                                ) &&
+        ( I2C_FUNCTION_ACTIVE == i2c_DmaChannelState[ periphId ][ dmaDir ].Initialized )    )
     {
         const i2c_DmaChannelState_t * const chState   = &i2c_DmaChannelState[ periphId ][ dmaDir ];
         const gpdma_PeriphId_t              dmaPeriph = (gpdma_PeriphId_t)chState->PeriphId;
         const gpdma_ChannelId_t             dmaChan   = (gpdma_ChannelId_t)chState->ChannelId;
         gpdma_RequestState_t                dmaState  = GPDMA_REQUEST_ERROR;
 
-        if( I2C_DMA_DIR_TX == dmaDir )
-        {
-            dmaState = Gpdma_Set_BlockSize( dmaPeriph, dmaChan, (gpdma_BlockSize_t)xferCtx->Request.TxSize );
+        dmaState = Gpdma_Set_BlockSize( dmaPeriph, dmaChan, (gpdma_BlockSize_t)dataCnt );
 
-            if( GPDMA_REQUEST_OK == dmaState )
-            {
-                dmaState = Gpdma_Set_SourceAddr( dmaPeriph, dmaChan, (gpdma_SrcAddr_t)xferCtx->Request.TxData );
-            }
-            else
-            {
-                /* Block size configuration failed */
-            }
+        if( ( GPDMA_REQUEST_OK == dmaState ) &&
+            ( I2C_DMA_DIR_TX   == dmaDir   )    )
+        {
+            dmaState = Gpdma_Set_SourceAddr( dmaPeriph, dmaChan, (gpdma_SrcAddr_t)memData );
+        }
+        else if( GPDMA_REQUEST_OK == dmaState )
+        {
+            dmaState = Gpdma_Set_DestinationAddr( dmaPeriph, dmaChan, (gpdma_DstAddr_t)memData );
         }
         else
         {
-            dmaState = Gpdma_Set_BlockSize( dmaPeriph, dmaChan, (gpdma_BlockSize_t)xferCtx->Request.RxSize );
+            /* Block size configuration failed */
+        }
 
-            if( GPDMA_REQUEST_OK == dmaState )
-            {
-                dmaState = Gpdma_Set_DestinationAddr( dmaPeriph, dmaChan, (gpdma_DstAddr_t)xferCtx->Request.RxData );
-            }
-            else
-            {
-                /* Block size configuration failed */
-            }
+        if( 0u == dataCnt )
+        {
+            /* Empty block is not armed */
+            dmaState = GPDMA_REQUEST_ERROR;
+        }
+        else
+        {
+            /* Block of the transfer */
         }
 
         if( GPDMA_REQUEST_OK == dmaState )
@@ -938,6 +1167,51 @@ static i2c_RequestState_t I2c_Dma_Get_Remaining( i2c_PeriphId_t periphId, i2c_Dm
 
 
 /**
+ * \brief Returns count of bytes read by the GPDMA channel of one direction into its FIFO and not
+ *        yet written to the destination
+ *
+ * \param periphId   [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param dmaDir     [in]: Data transfer direction
+ * \param fifoLevel [out]: Pointer to store the FIFO level. Must not be NULL.
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Dma_Get_FifoLevel( i2c_PeriphId_t periphId,
+                                                 i2c_DmaDir_t dmaDir,
+                                                 gpdma_FifoLevel_t * const fifoLevel )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( ( I2C_PERIPH_CNT       > periphId                                              ) &&
+        ( I2C_DMA_DIR_CNT      > dmaDir                                                ) &&
+        ( I2C_NULL_PTR        != fifoLevel                                             ) &&
+        ( I2C_FUNCTION_ACTIVE == i2c_DmaChannelState[ periphId ][ dmaDir ].Initialized )    )
+    {
+        const i2c_DmaChannelState_t * const chState  = &i2c_DmaChannelState[ periphId ][ dmaDir ];
+        const gpdma_RequestState_t          dmaState = Gpdma_Get_FifoLevel( (gpdma_PeriphId_t)chState->PeriphId,
+                                                                            (gpdma_ChannelId_t)chState->ChannelId,
+                                                                            fifoLevel );
+
+        if( GPDMA_REQUEST_OK == dmaState )
+        {
+            retState = I2C_REQUEST_OK;
+        }
+        else
+        {
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
  * \brief DMA error processing - the transfer is aborted and every reported GPDMA error bit is
  *        forwarded as data transfer error
  *
@@ -962,6 +1236,60 @@ static i2c_RequestState_t I2c_Dma_XferError( i2c_PeriphId_t periphId, gpdma_Erro
         {
             /* Error bit is not reported */
         }
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief GPDMA transfer complete processing - a slave phase whose buffer was moved completely
+ *        continues by the I2C interrupt (fill bytes are sent / further bytes are discarded). The
+ *        end of a master transfer is processed on STOP.
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param dmaDir   [in]: Data transfer direction of the channel
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Dma_XferComplete( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir )
+{
+    i2c_RequestState_t  retState = I2C_REQUEST_ERROR;
+    i2c_XferContext_t * xferCtx  = I2C_NULL_PTR;
+
+    retState = I2c_Get_XferContext( periphId, &xferCtx );
+
+    if( ( I2C_REQUEST_OK      == retState           ) &&
+        ( I2C_ROLE_SLAVE      == xferCtx->Role      ) &&
+        ( I2C_FUNCTION_ACTIVE == xferCtx->XferState )    )
+    {
+        i2c_IsrItMask_t dataIt = (i2c_IsrItMask_t)I2C_ISR_IT_RX;
+
+        if( I2C_DMA_DIR_TX == dmaDir )
+        {
+            xferCtx->TxIdx = xferCtx->SlaveBuffer.TxSize;
+            dataIt         = (i2c_IsrItMask_t)I2C_ISR_IT_TX;
+        }
+        else
+        {
+            xferCtx->RxIdx = xferCtx->SlaveBuffer.RxSize;
+        }
+
+        retState = I2c_Dma_Set_Request( periphId, dmaDir, I2C_FUNCTION_INACTIVE );
+
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Isr_Set_ItActive( periphId, dataIt );
+        }
+        else
+        {
+            /* DMA request could not be disabled */
+        }
+    }
+    else
+    {
+        /* Master transfer or no slave transfer is running */
     }
 
     return ( retState );
@@ -1005,8 +1333,10 @@ typedef enum
 /** \brief DMA handlers of one peripheral (registered in DMA module) */
 typedef struct
 {
-    dma_IsrCallback TxErrorIsr; /**< Transmission transfer error handler */
-    dma_IsrCallback RxErrorIsr; /**< Reception transfer error handler    */
+    dma_IsrCallback TxErrorIsr;    /**< Transmission transfer error handler    */
+    dma_IsrCallback RxErrorIsr;    /**< Reception transfer error handler       */
+    dma_IsrCallback TxCompleteIsr; /**< Transmission transfer complete handler */
+    dma_IsrCallback RxCompleteIsr; /**< Reception transfer complete handler    */
 }   i2c_DmaIsrConfig_t;
 
 
@@ -1026,8 +1356,10 @@ typedef struct
  * \param name [in]: Peripheral name used in the handler names (e.g. I2c1)
  */
 #define I2C_DMA_DECLARE_HANDLERS( name )                                                \
-    static void I2c_Dma_##name##_TxError ( void );                                      \
-    static void I2c_Dma_##name##_RxError ( void )
+    static void I2c_Dma_##name##_TxError    ( void );                                   \
+    static void I2c_Dma_##name##_RxError    ( void );                                   \
+    static void I2c_Dma_##name##_TxComplete ( void );                                   \
+    static void I2c_Dma_##name##_RxComplete ( void )
 
 /**
  * \brief Defines DMA handlers of one I2C peripheral - every handler forwards the event with the
@@ -1038,7 +1370,9 @@ typedef struct
  */
 #define I2C_DMA_DEFINE_HANDLERS( name, periphId )                                                          \
     static void I2c_Dma_##name##_TxError( void ) { (void)I2c_Dma_XferError( periphId ); }                  \
-    static void I2c_Dma_##name##_RxError( void ) { (void)I2c_Dma_XferError( periphId ); }
+    static void I2c_Dma_##name##_RxError( void ) { (void)I2c_Dma_XferError( periphId ); }                  \
+    static void I2c_Dma_##name##_TxComplete( void ) { (void)I2c_Dma_XferComplete( periphId, I2C_DMA_DIR_TX ); } \
+    static void I2c_Dma_##name##_RxComplete( void ) { (void)I2c_Dma_XferComplete( periphId, I2C_DMA_DIR_RX ); }
 
 /**
  * \brief Initializer of \ref i2c_DmaIsrConfig_t of one I2C peripheral
@@ -1046,17 +1380,22 @@ typedef struct
  * \param name [in]: Peripheral name used in the handler names (e.g. I2c1)
  */
 #define I2C_DMA_ISR_CONFIG( name )                                                      \
-    { .TxErrorIsr = I2c_Dma_##name##_TxError, .RxErrorIsr = I2c_Dma_##name##_RxError }
+    { .TxErrorIsr    = I2c_Dma_##name##_TxError,    .RxErrorIsr    = I2c_Dma_##name##_RxError,    \
+      .TxCompleteIsr = I2c_Dma_##name##_TxComplete, .RxCompleteIsr = I2c_Dma_##name##_RxComplete }
 
 /* ======================== FORWARD DECLARATIONS ============================ */
 
 static i2c_RequestState_t I2c_Dma_Set_ChannelInit ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 static i2c_RequestState_t I2c_Dma_Set_ChannelOff  ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
-static i2c_RequestState_t I2c_Dma_Set_Transfer    ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
+static i2c_RequestState_t I2c_Dma_Set_Transfer    ( i2c_PeriphId_t periphId,
+                                                    i2c_DmaDir_t dmaDir,
+                                                    const i2c_Data_t * const memData,
+                                                    i2c_DataCnt_t dataCnt );
 static i2c_RequestState_t I2c_Dma_Set_Request     ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, i2c_FunctionState_t reqState );
 static i2c_RequestState_t I2c_Dma_Set_Stop        ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 static i2c_RequestState_t I2c_Dma_Get_Remaining   ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir, dma_DataCount_t * const remaining );
 static i2c_RequestState_t I2c_Dma_XferError       ( i2c_PeriphId_t periphId );
+static i2c_RequestState_t I2c_Dma_XferComplete    ( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir );
 
 #ifdef I2C1
 I2C_DMA_DECLARE_HANDLERS( I2c1 );
@@ -1090,7 +1429,8 @@ static const i2c_DmaIsrConfig_t i2c_DmaIsrConfig[ ] =
     I2C_DMA_ISR_CONFIG( I2c3 ),
 #endif /* I2C3 */
 #ifdef I2C4
-    { .TxErrorIsr = DMA_NULL_PTR, .RxErrorIsr = DMA_NULL_PTR },   /* No DMA mode (BDMA / DMAMUX2) */
+    { .TxErrorIsr    = DMA_NULL_PTR, .RxErrorIsr    = DMA_NULL_PTR,
+      .TxCompleteIsr = DMA_NULL_PTR, .RxCompleteIsr = DMA_NULL_PTR },   /* No DMA mode (BDMA / DMAMUX2) */
 #endif /* I2C4 */
 #ifdef I2C5
     I2C_DMA_ISR_CONFIG( I2c5 ),
@@ -1261,7 +1601,10 @@ i2c_RequestState_t I2c_Dma_XferStart( i2c_PeriphId_t periphId )
     if( ( I2C_REQUEST_OK == retState                ) &&
         ( 0u              < xferCtx->Request.TxSize )    )
     {
-        retState = I2c_Dma_Set_Transfer( periphId, I2C_DMA_DIR_TX );
+        retState = I2c_Dma_Set_Transfer( periphId,
+                                         I2C_DMA_DIR_TX,
+                                         xferCtx->Request.TxData,
+                                         xferCtx->Request.TxSize );
 
         if( I2C_REQUEST_OK == retState )
         {
@@ -1280,7 +1623,10 @@ i2c_RequestState_t I2c_Dma_XferStart( i2c_PeriphId_t periphId )
     if( ( I2C_REQUEST_OK == retState                ) &&
         ( 0u              < xferCtx->Request.RxSize )    )
     {
-        retState = I2c_Dma_Set_Transfer( periphId, I2C_DMA_DIR_RX );
+        retState = I2c_Dma_Set_Transfer( periphId,
+                                         I2C_DMA_DIR_RX,
+                                         xferCtx->Request.RxData,
+                                         xferCtx->Request.RxSize );
 
         if( I2C_REQUEST_OK == retState )
         {
@@ -1393,6 +1739,197 @@ i2c_RequestState_t I2c_Dma_Check_Done( i2c_PeriphId_t periphId )
     return ( retState );
 }
 
+
+/**
+ * \brief Starts / stops listening of the slave in DMA mode - slave sequencing events are enabled /
+ *        DMA streams, I2C DMA requests and all I2C interrupt sources are disabled
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param listenState [in]: Listen started / stopped, value from \ref i2c_FunctionState_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Dma_Listen( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_FUNCTION_ACTIVE == listenState )
+    {
+        retState = I2c_Isr_Set_ItActive( periphId, I2C_ISR_IT_SLAVE );
+    }
+    else
+    {
+        retState = I2c_Dma_XferStop( periphId );
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Starts the slave phase of the direction of the address match - the DMA stream of the
+ *        direction is armed with the buffer of the slave and the I2C DMA request is enabled. An
+ *        empty buffer is handled by the I2C interrupt (fill bytes / discarded bytes).
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Dma_SlavePhase( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t  retState = I2C_REQUEST_ERROR;
+    i2c_XferContext_t * xferCtx  = I2C_NULL_PTR;
+
+    retState = I2c_Get_XferContext( periphId, &xferCtx );
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        const i2c_SlaveBuffer_t slaveBuffer = xferCtx->SlaveBuffer;
+        i2c_DmaDir_t            dmaDir      = I2C_DMA_DIR_RX;
+        const i2c_Data_t *      memData     = slaveBuffer.RxData;
+        i2c_DataCnt_t           dataCnt     = slaveBuffer.RxSize;
+        i2c_IsrItMask_t         dataIt      = (i2c_IsrItMask_t)I2C_ISR_IT_RX;
+
+        if( I2C_SLAVE_DIR_READ == xferCtx->SlaveDir )
+        {
+            dmaDir  = I2C_DMA_DIR_TX;
+            memData = slaveBuffer.TxData;
+            dataCnt = slaveBuffer.TxSize;
+            dataIt  = (i2c_IsrItMask_t)I2C_ISR_IT_TX;
+        }
+        else
+        {
+            /* Master writes - reception */
+        }
+
+        if( 0u < dataCnt )
+        {
+            retState = I2c_Dma_Set_Transfer( periphId, dmaDir, memData, dataCnt );
+
+            if( I2C_REQUEST_OK == retState )
+            {
+                retState = I2c_Dma_Set_Request( periphId, dmaDir, I2C_FUNCTION_ACTIVE );
+            }
+            else
+            {
+                /* DMA stream could not be armed */
+            }
+        }
+        else
+        {
+            /* Empty buffer - every byte is beyond the buffer */
+            retState = I2c_Isr_Set_ItActive( periphId, dataIt );
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Ends the slave phase in DMA mode - the count of moved bytes is taken from the DMA
+ *        stream (unless the stream finished the buffer), the stream, the I2C DMA request and
+ *        the data register interrupts are disabled
+ *
+ * \note  The streams work in direct mode (no FIFO) - every byte counted by the stream was
+ *        moved to / from the data register.
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Dma_SlavePhaseEnd( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t  retState  = I2C_REQUEST_ERROR;
+    I2C_TypeDef *       periphReg = I2C_NULL_PTR;
+    i2c_XferContext_t * xferCtx   = I2C_NULL_PTR;
+
+    retState = I2c_Get_PeriphReg( periphId, &periphReg );
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        retState = I2c_Get_XferContext( periphId, &xferCtx );
+    }
+    else
+    {
+        /* Invalid peripheral identification */
+    }
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        dma_DataCount_t remaining = 0u;
+        i2c_DmaDir_t    dmaDir    = I2C_DMA_DIR_RX;
+        uint32_t        dmaReqEn  = LL_I2C_IsEnabledDMAReq_RX( periphReg );
+        dma_DataCount_t blockSize = (dma_DataCount_t)xferCtx->SlaveBuffer.RxSize;
+
+        if( I2C_SLAVE_DIR_READ == xferCtx->SlaveDir )
+        {
+            dmaDir    = I2C_DMA_DIR_TX;
+            dmaReqEn  = LL_I2C_IsEnabledDMAReq_TX( periphReg );
+            blockSize = (dma_DataCount_t)xferCtx->SlaveBuffer.TxSize;
+        }
+        else
+        {
+            /* Master wrote - reception */
+        }
+
+        if( 0u != dmaReqEn )
+        {
+            /* DMA stream did not finish the buffer - moved bytes are counted */
+            retState = I2c_Dma_Get_Remaining( periphId, dmaDir, &remaining );
+
+            if( ( I2C_REQUEST_OK == retState  ) &&
+                ( I2C_DMA_DIR_TX == dmaDir    ) &&
+                ( blockSize      >= remaining )    )
+            {
+                xferCtx->TxIdx = (i2c_DataCnt_t)( blockSize - remaining );
+            }
+            else if( ( I2C_REQUEST_OK == retState  ) &&
+                     ( I2C_DMA_DIR_RX == dmaDir    ) &&
+                     ( blockSize      >= remaining )    )
+            {
+                xferCtx->RxIdx = (i2c_DataCnt_t)( blockSize - remaining );
+            }
+            else
+            {
+                /* Remaining size is not available */
+                retState = I2C_REQUEST_ERROR;
+            }
+        }
+        else
+        {
+            /* Buffer finished by the DMA stream (index set by the transfer complete) or empty buffer */
+        }
+
+        const i2c_RequestState_t stopState = I2c_Dma_Set_Stop( periphId, dmaDir );
+        const i2c_RequestState_t itState   = I2c_Isr_Set_ItInactive( periphId, I2C_ISR_IT_DATA );
+
+        if( ( I2C_REQUEST_OK == retState  ) &&
+            ( I2C_REQUEST_OK == stopState ) &&
+            ( I2C_REQUEST_OK == itState   )    )
+        {
+            retState = I2C_REQUEST_OK;
+        }
+        else
+        {
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
 /* =========================== LOCAL FUNCTIONS ============================== */
 
 /**
@@ -1481,22 +2018,23 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelInit( i2c_PeriphId_t periphId, i2c_
             dmaConfig.MemoryAddress            = 0u;
             dmaConfig.DataCount                = 0u;
             dmaConfig.Priority                 = (dma_Priority_t)dmaPrio;
-            dmaConfig.TransferCompleteCallback = DMA_NULL_PTR;
             dmaConfig.HalfTransferCallback     = DMA_NULL_PTR;
 
             if( I2C_DMA_DIR_TX == dmaDir )
             {
-                dmaConfig.Direction             = DMA_DIR_MEMORY_TO_PERIPH;
-                dmaConfig.PeripheralReqId       = txRequest;
-                dmaConfig.PeriphAddress         = (dma_PeriphAddr_t)LL_I2C_DMA_GetRegAddr( periphReg, LL_I2C_DMA_REG_DATA_TRANSMIT );
-                dmaConfig.TransferErrorCallback = isrConfig->TxErrorIsr;
+                dmaConfig.Direction                = DMA_DIR_MEMORY_TO_PERIPH;
+                dmaConfig.PeripheralReqId          = txRequest;
+                dmaConfig.PeriphAddress            = (dma_PeriphAddr_t)LL_I2C_DMA_GetRegAddr( periphReg, LL_I2C_DMA_REG_DATA_TRANSMIT );
+                dmaConfig.TransferCompleteCallback = isrConfig->TxCompleteIsr;
+                dmaConfig.TransferErrorCallback    = isrConfig->TxErrorIsr;
             }
             else
             {
-                dmaConfig.Direction             = DMA_DIR_PERIPH_TO_MEMORY;
-                dmaConfig.PeripheralReqId       = rxRequest;
-                dmaConfig.PeriphAddress         = (dma_PeriphAddr_t)LL_I2C_DMA_GetRegAddr( periphReg, LL_I2C_DMA_REG_DATA_RECEIVE );
-                dmaConfig.TransferErrorCallback = isrConfig->RxErrorIsr;
+                dmaConfig.Direction                = DMA_DIR_PERIPH_TO_MEMORY;
+                dmaConfig.PeripheralReqId          = rxRequest;
+                dmaConfig.PeriphAddress            = (dma_PeriphAddr_t)LL_I2C_DMA_GetRegAddr( periphReg, LL_I2C_DMA_REG_DATA_RECEIVE );
+                dmaConfig.TransferCompleteCallback = isrConfig->RxCompleteIsr;
+                dmaConfig.TransferErrorCallback    = isrConfig->RxErrorIsr;
             }
 
             dmaState = Dma_Init( &dmaConfig );
@@ -1517,7 +2055,7 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelInit( i2c_PeriphId_t periphId, i2c_
             /* Default configuration is not available */
         }
 
-        /* Only the transfer error is reported by the DMA interrupt */
+        /* Master: only the transfer error is reported by the DMA interrupt */
         if( DMA_REQUEST_OK == dmaState )
         {
             dmaState = Dma_Set_TransferErrorIrqActive( (dma_PeriphId_t)dmaPeriph, (dma_ChannelId_t)dmaChannel );
@@ -1525,6 +2063,17 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelInit( i2c_PeriphId_t periphId, i2c_
         else
         {
             /* DMA stream configuration failed */
+        }
+
+        /* Slave: the transfer complete of the stream switches the phase to the I2C interrupt */
+        if( ( DMA_REQUEST_OK == dmaState           ) &&
+            ( I2C_ROLE_SLAVE == xferCtx->Role      )    )
+        {
+            dmaState = Dma_Set_TransferCompleteIrqActive( (dma_PeriphId_t)dmaPeriph, (dma_ChannelId_t)dmaChannel );
+        }
+        else
+        {
+            /* Master (transfer complete is not used) or configuration failed */
         }
 
         if( DMA_REQUEST_OK == dmaState )
@@ -1591,11 +2140,20 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelOff( i2c_PeriphId_t periphId, i2c_D
 
             if( DMA_REQUEST_OK == dmaState )
             {
+                dmaState = Dma_Set_TransferCompleteIrqInactive( dmaPeriph, dmaChan );
+            }
+            else
+            {
+                /* Transfer error interrupt could not be disabled */
+            }
+
+            if( DMA_REQUEST_OK == dmaState )
+            {
                 dmaState = Dma_Set_InterruptInactive( dmaPeriph, dmaChan );
             }
             else
             {
-                /* Error interrupt could not be disabled */
+                /* Transfer complete interrupt could not be disabled */
             }
 
             if( DMA_REQUEST_OK == dmaState )
@@ -1624,47 +2182,41 @@ static i2c_RequestState_t I2c_Dma_Set_ChannelOff( i2c_PeriphId_t periphId, i2c_D
 
 
 /**
- * \brief Arms the DMA stream of one direction for the running request - the stream is disabled
- *        (it stays enabled after a normal mode transfer), memory address and data count are
- *        written and the stream is enabled
+ * \brief Arms the DMA stream of one direction (the stream is disabled - it stays enabled after a
+ *        normal mode transfer -, memory address and data count are written and the stream is
+ *        enabled)
+ *
+ * - Transmission: dataCnt bytes from memData
+ * - Reception:    dataCnt bytes into memData
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  * \param dmaDir   [in]: Direction, value from \ref i2c_DmaDir_t
+ * \param memData  [in]: Memory buffer of the direction (request of the master, buffer of the slave)
+ * \param dataCnt  [in]: Count of bytes (not zero)
  *
  * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
  *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
  */
-static i2c_RequestState_t I2c_Dma_Set_Transfer( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir )
+static i2c_RequestState_t I2c_Dma_Set_Transfer( i2c_PeriphId_t periphId,
+                                                i2c_DmaDir_t dmaDir,
+                                                const i2c_Data_t * const memData,
+                                                i2c_DataCnt_t dataCnt )
 {
-    i2c_RequestState_t  retState = I2C_REQUEST_ERROR;
-    i2c_XferContext_t * xferCtx  = I2C_NULL_PTR;
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
 
-    retState = I2c_Get_XferContext( periphId, &xferCtx );
-
-    if( ( I2C_REQUEST_OK      == retState                                              ) &&
+    if( ( I2C_PERIPH_CNT       > periphId                                              ) &&
         ( I2C_DMA_DIR_CNT      > dmaDir                                                ) &&
+        ( 0u                   < dataCnt                                               ) &&
         ( I2C_FUNCTION_ACTIVE == i2c_DmaChannelState[ periphId ][ dmaDir ].Initialized )    )
     {
         const i2c_DmaChannelState_t * const chState   = &i2c_DmaChannelState[ periphId ][ dmaDir ];
         const dma_PeriphId_t                dmaPeriph = (dma_PeriphId_t)chState->PeriphId;
         const dma_ChannelId_t               dmaChan   = (dma_ChannelId_t)chState->ChannelId;
-        dma_MemoryAddr_t                    memAddr   = (dma_MemoryAddr_t)xferCtx->Request.TxData;
-        dma_DataCount_t                     dataCnt   = (dma_DataCount_t)xferCtx->Request.TxSize;
         dma_RequestState_t                  dmaState  = Dma_Set_TransferInactive( dmaPeriph, dmaChan );
-
-        if( I2C_DMA_DIR_RX == dmaDir )
-        {
-            memAddr = (dma_MemoryAddr_t)xferCtx->Request.RxData;
-            dataCnt = (dma_DataCount_t)xferCtx->Request.RxSize;
-        }
-        else
-        {
-            /* Transmission data */
-        }
 
         if( DMA_REQUEST_OK == dmaState )
         {
-            dmaState = Dma_Set_MemoryAddr( dmaPeriph, dmaChan, memAddr );
+            dmaState = Dma_Set_MemoryAddr( dmaPeriph, dmaChan, (dma_MemoryAddr_t)(uintptr_t)memData );
         }
         else
         {
@@ -1673,7 +2225,7 @@ static i2c_RequestState_t I2c_Dma_Set_Transfer( i2c_PeriphId_t periphId, i2c_Dma
 
         if( DMA_REQUEST_OK == dmaState )
         {
-            dmaState = Dma_Set_DataCount( dmaPeriph, dmaChan, dataCnt );
+            dmaState = Dma_Set_DataCount( dmaPeriph, dmaChan, (dma_DataCount_t)dataCnt );
         }
         else
         {
@@ -1889,6 +2441,60 @@ static i2c_RequestState_t I2c_Dma_Get_Remaining( i2c_PeriphId_t periphId, i2c_Dm
 static i2c_RequestState_t I2c_Dma_XferError( i2c_PeriphId_t periphId )
 {
     return ( I2c_Set_XferError( periphId, I2C_XFER_ERROR_DMA_TRANSFER ) );
+}
+
+
+/**
+ * \brief DMA transfer complete processing - a slave phase whose buffer was moved completely
+ *        continues by the I2C interrupt (fill bytes are sent / further bytes are discarded). The
+ *        end of a master transfer is processed on STOP.
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param dmaDir   [in]: Data transfer direction of the stream
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Dma_XferComplete( i2c_PeriphId_t periphId, i2c_DmaDir_t dmaDir )
+{
+    i2c_RequestState_t  retState = I2C_REQUEST_ERROR;
+    i2c_XferContext_t * xferCtx  = I2C_NULL_PTR;
+
+    retState = I2c_Get_XferContext( periphId, &xferCtx );
+
+    if( ( I2C_REQUEST_OK      == retState           ) &&
+        ( I2C_ROLE_SLAVE      == xferCtx->Role      ) &&
+        ( I2C_FUNCTION_ACTIVE == xferCtx->XferState )    )
+    {
+        i2c_IsrItMask_t dataIt = (i2c_IsrItMask_t)I2C_ISR_IT_RX;
+
+        if( I2C_DMA_DIR_TX == dmaDir )
+        {
+            xferCtx->TxIdx = xferCtx->SlaveBuffer.TxSize;
+            dataIt         = (i2c_IsrItMask_t)I2C_ISR_IT_TX;
+        }
+        else
+        {
+            xferCtx->RxIdx = xferCtx->SlaveBuffer.RxSize;
+        }
+
+        retState = I2c_Dma_Set_Request( periphId, dmaDir, I2C_FUNCTION_INACTIVE );
+
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Isr_Set_ItActive( periphId, dataIt );
+        }
+        else
+        {
+            /* DMA request could not be disabled */
+        }
+    }
+    else
+    {
+        /* Master transfer or no slave transfer is running */
+    }
+
+    return ( retState );
 }
 
 /* =========================== INTERRUPT HANDLERS =========================== */

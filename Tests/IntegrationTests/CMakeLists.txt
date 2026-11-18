@@ -1,13 +1,14 @@
 #===================== Integration tests configuration ========================#
-# Integration tests of I2c module on target (Nucleo-144 / 32F746GDISCOVERY). Registered in module
+# Integration tests of I2c module on target (Nucleo-144 boards). Registered in module
 # CMakeLists.txt by IntegrationTesting_AddPath() and created by
 # IntegrationTesting_Generate() in "IntegrationTest" build
 # (see EmBi_Platform/CMake/IntegrationTesting/README.md).
 #
-# Master I2C1 (PB8 SCL / PB9 SDA - Arduino D15 / D14) is the module under test. Slave
-# I2C2 (PF1 SCL / PF0 SDA) of Nucleo-144 boards emulates a register device in the
-# interrupt of the test set (LL). Wiring PB8 - PF1 and PB9 - PF0, without it (and on
-# 32F746GDISCOVERY) the slave tests are ignored.
+# Master I2C1 (PB8 SCL / PB9 SDA - Arduino D15 / D14) is wired to the slave I2C peripheral
+# of the same MCU (feature I2C_LOOP of the board inventory): I2C2 PB10 / PB11 on NUCLEO-H7A3ZI-Q
+# and NUCLEO-H7S3L8, I2C4 PB6 / PB7 on NUCLEO-H723ZG and NUCLEO-H755ZI-Q. The slave of the
+# I2c module (register device) is the counterpart of the master tests; a board without the
+# wiring ignores the master + slave tests.
 #
 # The test set is independent - target interface (entry point, initialization,
 # fault handlers, system reset) is implemented by ItTarget_I2c.c and
@@ -40,16 +41,16 @@ if(MCU_FAMILY_ID STREQUAL "STM32H7RSxx")
 
 else()
 
-    # Classic STM32H7 (NUCLEO-H723ZG, NUCLEO-H7A3ZI-Q)
+    # Classic STM32H7 (NUCLEO-H723ZG, NUCLEO-H7A3ZI-Q, NUCLEO-H755ZI-Q)
     IntegrationTesting_Add_Test(
         NAME            I2c
         TEST_SOURCE     ItTest_I2c.c
         SOURCES         ItTarget_I2c.c      # Target interface of the test set
         LINK_LIBS       StartUp_Lib         # Startup code (calls BspMain)
-                        Nvic_Lib            # Fault handlers, system reset (ItTarget), slave interrupt
+                        Nvic_Lib            # Fault handlers, system reset (ItTarget)
                         I2c_Lib             # Module under test
                         Rcc_Lib             # Kernel clock source verification
-        TIMEOUT         90
+        TIMEOUT         120
     )
 
 endif()

@@ -27,11 +27,16 @@ typedef enum
     I2C_ISR_IT_STOP   = LL_I2C_CR1_STOPIE,   /**< STOP condition detected (STOPF)                     */
     I2C_ISR_IT_TC     = LL_I2C_CR1_TCIE,     /**< Transfer complete / complete reload (TC / TCR)      */
     I2C_ISR_IT_ERR    = LL_I2C_CR1_ERRIE,    /**< Bus error / arbitration lost / overrun              */
+    I2C_ISR_IT_ADDR   = LL_I2C_CR1_ADDRIE,   /**< Slave address matched (ADDR)                        */
     I2C_ISR_IT_EVENTS = ( LL_I2C_CR1_NACKIE | LL_I2C_CR1_STOPIE |
                           LL_I2C_CR1_TCIE   | LL_I2C_CR1_ERRIE  ), /**< Transfer sequencing events (DMA and ISR mode) */
+    I2C_ISR_IT_SLAVE  = ( LL_I2C_CR1_ADDRIE | LL_I2C_CR1_NACKIE |
+                          LL_I2C_CR1_STOPIE | LL_I2C_CR1_ERRIE  ), /**< Slave sequencing events (DMA and ISR mode)    */
+    I2C_ISR_IT_DATA   = ( LL_I2C_CR1_TXIE   | LL_I2C_CR1_RXIE   ), /**< Data register events (ISR mode)               */
     I2C_ISR_IT_ALL    = ( LL_I2C_CR1_TXIE   | LL_I2C_CR1_RXIE   |
                           LL_I2C_CR1_NACKIE | LL_I2C_CR1_STOPIE |
-                          LL_I2C_CR1_TCIE   | LL_I2C_CR1_ERRIE  )  /**< All interrupt sources used by the handlers     */
+                          LL_I2C_CR1_TCIE   | LL_I2C_CR1_ERRIE  |
+                          LL_I2C_CR1_ADDRIE )                      /**< All interrupt sources used by the handlers     */
 }   i2c_IsrIt_t;
 
 
@@ -51,6 +56,8 @@ i2c_RequestState_t I2c_Isr_XferInit     ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Isr_XferDeinit   ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Isr_XferStart    ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Isr_XferStop     ( i2c_PeriphId_t periphId );
+
+i2c_RequestState_t I2c_Isr_Listen       ( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState );
 
 i2c_RequestState_t I2c_Isr_Set_ItActive   ( i2c_PeriphId_t periphId, i2c_IsrItMask_t itMask );
 i2c_RequestState_t I2c_Isr_Set_ItInactive ( i2c_PeriphId_t periphId, i2c_IsrItMask_t itMask );
