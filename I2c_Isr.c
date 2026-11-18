@@ -9,6 +9,10 @@
  * byte is expected. Every interrupt passes a snapshot of SR1 to I2c_Set_XferEvents() which
  * handles addressing, data, end of transfer and errors.
  *
+ * The listening slave (any mode with interrupts) enables the event and error interrupt while it
+ * listens, the buffer interrupt only for the running slave phase. The snapshot of SR1 is passed
+ * to I2c_Set_SlaveEvents().
+ *
  */
 /* ============================== INCLUDES ================================== */
 #include "I2c_Isr.h"                        /* Self include                   */
@@ -130,6 +134,72 @@ i2c_RequestState_t I2c_Isr_XferStop( i2c_PeriphId_t periphId )
 
 
 /**
+ * \brief Starts / stops listening of the slave in ISR mode - the event and error interrupt are
+ *        enabled / all I2C interrupt sources are disabled (the buffer interrupt is enabled by
+ *        the phase of the slave)
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param listenState [in]: Listen started / stopped, value from \ref i2c_FunctionState_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Isr_Listen( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_FUNCTION_ACTIVE == listenState )
+    {
+        retState = I2c_Isr_Set_ItActive( periphId, I2C_ISR_IT_EVENTS );
+    }
+    else
+    {
+        retState = I2c_Isr_Set_ItInactive( periphId, I2C_ISR_IT_ALL );
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Starts the slave phase in ISR mode - the buffer interrupt (RXNE / TXE) is enabled, the
+ *        bytes of the phase are moved by the interrupt
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Isr_SlavePhase( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    retState = I2c_Isr_Set_ItActive( periphId, I2C_ISR_IT_BUF );
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Ends the slave phase in ISR mode - the buffer interrupt is disabled (TXE may stay set
+ *        after the end of the read phase, the interrupt would not stop)
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Isr_SlavePhaseEnd( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    retState = I2c_Isr_Set_ItInactive( periphId, I2C_ISR_IT_BUF );
+
+    return ( retState );
+}
+
+
+/**
  * \brief Enables I2C interrupt sources (CR2) with read-back verification
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
@@ -223,7 +293,7 @@ i2c_RequestState_t I2c_Isr_Set_ItInactive( i2c_PeriphId_t periphId, i2c_IsrItMas
 
 /**
  * \brief I2C event and error interrupt handler (ISR and DMA mode) - SR1 snapshot is processed by
- *        the common sequencing
+ *        the common sequencing (slave: slave sequencing)
  *
  * \note  SR1 is read once - the read is the first step of the clearing sequences of SB, ADDR,
  *        ADD10 and BTF, which are completed by the sequencing.
@@ -235,12 +305,29 @@ i2c_RequestState_t I2c_Isr_Set_ItInactive( i2c_PeriphId_t periphId, i2c_IsrItMas
  */
 i2c_RequestState_t I2c_Isr_Handler( i2c_PeriphId_t periphId )
 {
-    i2c_RequestState_t retState  = I2C_REQUEST_ERROR;
-    I2C_TypeDef *      periphReg = I2C_NULL_PTR;
+    i2c_RequestState_t  retState  = I2C_REQUEST_ERROR;
+    I2C_TypeDef *       periphReg = I2C_NULL_PTR;
+    i2c_XferContext_t * xferCtx   = I2C_NULL_PTR;
 
     retState = I2c_Get_PeriphReg( periphId, &periphReg );
 
     if( I2C_REQUEST_OK == retState )
+    {
+        retState = I2c_Get_XferContext( periphId, &xferCtx );
+    }
+    else
+    {
+        /* Invalid peripheral identification */
+    }
+
+    if( ( I2C_REQUEST_OK == retState      ) &&
+        ( I2C_ROLE_SLAVE == xferCtx->Role )    )
+    {
+        const i2c_IsrFlags_t isrFlags = LL_I2C_ReadReg( periphReg, SR1 );
+
+        retState = I2c_Set_SlaveEvents( periphId, isrFlags );
+    }
+    else if( I2C_REQUEST_OK == retState )
     {
         const i2c_IsrFlags_t isrFlags = LL_I2C_ReadReg( periphReg, SR1 );
 

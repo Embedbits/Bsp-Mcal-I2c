@@ -4,12 +4,15 @@
  * \ingroup I2c
  * \brief Inter-Integrated Circuit (I2C) MCAL module common functionality
  *
- * The module drives STM32F4 I2C peripherals (I2C v1) in master mode:
+ * The module drives STM32F4 I2C peripherals (I2C v1) in master or slave mode:
  * - configuration: SCL frequency (CR2 FREQ, CCR and TRISE are calculated from PCLK1 and the
  *   I2C specification timings), analog / digital noise filter (devices with FLTR register),
- *   addressing mode, SCL / SDA pins
- * - transfers: write, read, write followed by read with repeated START and address only
+ *   addressing mode, SCL / SDA pins, role; slave: own addresses, general call, clock
+ *   stretching, fill byte
+ * - master transfers: write, read, write followed by read with repeated START and address only
  *   transfer (\ref i2c_XferRequest_t)
+ * - slave transfers: the slave listens (\ref I2c_Set_ListenStart), every address match starts
+ *   a phase of the master direction with the buffers of the application (\ref i2c_SlaveBuffer_t)
  *
  * I2C v1 has no hardware byte counter - the master transfer is sequenced by software for all
  * data transfer modes (I2c_Set_XferEvents, called with a snapshot of SR1):
@@ -28,6 +31,18 @@
  *
  * The transfer ends when the STOP condition is requested - the next transfer start waits until
  * the STOP condition is generated.
+ *
+ * Slave transfer sequencing is common for all data transfer modes (I2c_Set_SlaveEvents, called
+ * with a snapshot of SR1), in the order of the bus:
+ * - BERR / ARLO / OVR: the transfer ends with error, the slave keeps listening
+ * - RXNE / TXE:        byte is moved (ISR / POLL mode, DMA mode beyond the buffer)
+ * - AF:                NACK of the master ends the read phase and the transfer (STOPF is not set
+ *                      after a NACK)
+ * - STOPF:             end of the transfer after a write phase, the result is reported
+ * - ADDR:              a phase starts (also after repeated START); SR2 gives the direction (TRA)
+ *                      and the matched address (GENCALL / DUALF), reading it clears ADDR
+ *
+ * ACK is set while the slave listens (own addresses are acknowledged only then).
  *
  */
 /* ============================== INCLUDES ================================== */
@@ -140,6 +155,22 @@ static i2c_FunctionState_t I2c_Get_SwData           ( i2c_PeriphId_t periphId );
 static i2c_RequestState_t  I2c_None_Check_Config    ( i2c_PeriphId_t periphId, const i2c_DataConfig_t * const dataConfig );
 static i2c_RequestState_t  I2c_None_Xfer            ( i2c_PeriphId_t periphId );
 static i2c_RequestState_t  I2c_Soft_Check_TxDone    ( i2c_PeriphId_t periphId );
+static i2c_RequestState_t  I2c_None_Listen          ( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState );
+
+static i2c_RequestState_t  I2c_Check_SlaveConfig    ( const i2c_Config_t * const i2cConfig );
+static i2c_RequestState_t  I2c_Check_OwnAddr        ( i2c_SlaveAddr_t ownAddr, i2c_AddrMode_t addrMode );
+static i2c_RequestState_t  I2c_Check_SlaveBuffer    ( i2c_PeriphId_t periphId,
+                                                      const i2c_SlaveBuffer_t * const slaveBuffer );
+static i2c_RequestState_t  I2c_Set_SlaveConfig      ( i2c_PeriphId_t periphId, const i2c_Config_t * const i2cConfig );
+static i2c_RequestState_t  I2c_Set_OwnAddrEnable    ( i2c_PeriphId_t periphId, i2c_FunctionState_t enableState );
+static i2c_RequestState_t  I2c_Set_SlaveErrors      ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
+static i2c_RequestState_t  I2c_Set_SlaveRxByte      ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
+static i2c_RequestState_t  I2c_Set_SlaveTxByte      ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
+static i2c_RequestState_t  I2c_Set_SlaveNack        ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
+static i2c_RequestState_t  I2c_Set_SlaveStop        ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
+static i2c_RequestState_t  I2c_Set_SlaveAddrMatch   ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
+static i2c_RequestState_t  I2c_Set_SlavePhaseClose  ( i2c_PeriphId_t periphId );
+static i2c_RequestState_t  I2c_Set_SlaveEnd         ( i2c_PeriphId_t periphId );
 
 /* ========================== SYMBOLIC CONSTANTS ============================ */
 
@@ -147,7 +178,7 @@ static i2c_RequestState_t  I2c_Soft_Check_TxDone    ( i2c_PeriphId_t periphId );
 #define I2C_MAJOR_VERSION               ( 1u )
 
 /** Value of minor version of SW module */
-#define I2C_MINOR_VERSION               ( 0u )
+#define I2C_MINOR_VERSION               ( 1u )
 
 /** Value of patch version of SW module */
 #define I2C_PATCH_VERSION               ( 0u )
@@ -223,6 +254,31 @@ static i2c_RequestState_t  I2c_Soft_Check_TxDone    ( i2c_PeriphId_t periphId );
 /** Acknowledge control bits of CR1 used by the reception */
 #define I2C_CR1_ACK_MASK                ( I2C_CR1_ACK | I2C_CR1_POS )
 
+/** Default byte sent by the slave when the master reads beyond the transmit buffer */
+#define I2C_DEFAULT_FILL_BYTE           ( 0xFFu )
+
+/** 7-bit own address is placed in OAR1[7:1] / OAR2[7:1] */
+#define I2C_OWN_ADDR_7BIT_SHIFT         ( 1u )
+
+/** OAR1 fields configured by the module: address, addressing mode and the bit 14 */
+#define I2C_OAR1_CONFIG_MASK            ( I2C_OAR1_ADDMODE | \
+                                          I2C_OAR1_BIT14   | \
+                                          I2C_OAR1_ADD8_9  | \
+                                          I2C_OAR1_ADD1_7  | \
+                                          I2C_OAR1_ADD0      )
+
+/** OAR2 fields configured by the module: address and dual addressing enable */
+#define I2C_OAR2_CONFIG_MASK            ( I2C_OAR2_ADD2 | I2C_OAR2_ENDUAL )
+
+/** Flags terminating the slave transfer (the slave keeps listening) */
+#define I2C_SR1_SLAVE_ERROR_MASK        ( I2C_SR1_BERR | I2C_SR1_ARLO | I2C_SR1_OVR )
+
+/** CR1 fields of the slave configured by I2c_Init() (NOSTRETCH requires PE = 0) */
+#define I2C_CR1_SLAVE_MASK              ( I2C_CR1_NOSTRETCH )
+
+/** CR1 fields enabling the answer of the slave (acknowledge of the address and of the data) */
+#define I2C_CR1_LISTEN_MASK             ( I2C_CR1_ACK | I2C_CR1_POS | I2C_CR1_ENGC )
+
 /* =============================== MACROS =================================== */
 
 /** Integer division rounded up */
@@ -283,6 +339,17 @@ static const i2c_SlaveAddr_t i2c_SlaveAddrMaxLut[ I2C_ADDR_MODE_CNT ] =
 };
 
 
+/** \brief Result of a slave transfer before the first byte */
+static const i2c_SlaveResult_t i2c_SlaveResultNone =
+{
+    .MatchedAddr    = I2C_SLAVE_ADDR_GENERAL_CALL,
+    .RxCnt          = 0u,
+    .TxCnt          = 0u,
+    .RxBeyondBuffer = I2C_FLAG_INACTIVE,
+    .TxBeyondBuffer = I2C_FLAG_INACTIVE,
+};
+
+
 /** \brief i2c_PinPull_t -> GPIO pull configuration */
 static const gpio_PinPullCfg_t i2c_PinPullLut[ I2C_PIN_PULL_CNT ] =
 {
@@ -294,14 +361,58 @@ static const gpio_PinPullCfg_t i2c_PinPullLut[ I2C_PIN_PULL_CNT ] =
 /** \brief i2c_XferMode_t -> data transfer mode handler */
 static const i2c_XferModeIf_t i2c_XferModeLut[ I2C_XFER_MODE_CNT ] =
 {
-    [I2C_XFER_MODE_NONE] = { .CheckConfig = I2c_None_Check_Config, .Init = I2c_None_Xfer,     .Deinit = I2c_None_Xfer,
-                             .Start       = I2c_None_Xfer,         .Stop = I2c_None_Xfer,     .CheckTxDone = I2c_None_Xfer,         .CheckDone = I2c_None_Xfer      },
-    [I2C_XFER_MODE_DMA]  = { .CheckConfig = I2c_Dma_Check_Config,  .Init = I2c_Dma_XferInit,  .Deinit = I2c_Dma_XferDeinit,
-                             .Start       = I2c_Dma_XferStart,     .Stop = I2c_Dma_XferStop,  .CheckTxDone = I2c_Dma_Check_TxDone,  .CheckDone = I2c_Dma_Check_Done },
-    [I2C_XFER_MODE_ISR]  = { .CheckConfig = I2c_Isr_Check_Config,  .Init = I2c_Isr_XferInit,  .Deinit = I2c_Isr_XferDeinit,
-                             .Start       = I2c_Isr_XferStart,     .Stop = I2c_Isr_XferStop,  .CheckTxDone = I2c_Soft_Check_TxDone, .CheckDone = I2c_None_Xfer      },
-    [I2C_XFER_MODE_POLL] = { .CheckConfig = I2c_Poll_Check_Config, .Init = I2c_Poll_XferInit, .Deinit = I2c_Poll_XferDeinit,
-                             .Start       = I2c_Poll_XferStart,    .Stop = I2c_Poll_XferStop, .CheckTxDone = I2c_Soft_Check_TxDone, .CheckDone = I2c_None_Xfer      },
+    [I2C_XFER_MODE_NONE] =
+    {
+        .CheckConfig   = I2c_None_Check_Config,
+        .Init          = I2c_None_Xfer,
+        .Deinit        = I2c_None_Xfer,
+        .Start         = I2c_None_Xfer,
+        .Stop          = I2c_None_Xfer,
+        .CheckTxDone   = I2c_None_Xfer,
+        .CheckDone     = I2c_None_Xfer,
+        .Listen        = I2c_None_Listen,
+        .SlavePhase    = I2c_None_Xfer,
+        .SlavePhaseEnd = I2c_None_Xfer,
+    },
+    [I2C_XFER_MODE_DMA] =
+    {
+        .CheckConfig   = I2c_Dma_Check_Config,
+        .Init          = I2c_Dma_XferInit,
+        .Deinit        = I2c_Dma_XferDeinit,
+        .Start         = I2c_Dma_XferStart,
+        .Stop          = I2c_Dma_XferStop,
+        .CheckTxDone   = I2c_Dma_Check_TxDone,
+        .CheckDone     = I2c_Dma_Check_Done,
+        .Listen        = I2c_Dma_Listen,
+        .SlavePhase    = I2c_Dma_SlavePhase,
+        .SlavePhaseEnd = I2c_Dma_SlavePhaseEnd,
+    },
+    [I2C_XFER_MODE_ISR] =
+    {
+        .CheckConfig   = I2c_Isr_Check_Config,
+        .Init          = I2c_Isr_XferInit,
+        .Deinit        = I2c_Isr_XferDeinit,
+        .Start         = I2c_Isr_XferStart,
+        .Stop          = I2c_Isr_XferStop,
+        .CheckTxDone   = I2c_Soft_Check_TxDone,
+        .CheckDone     = I2c_None_Xfer,
+        .Listen        = I2c_Isr_Listen,
+        .SlavePhase    = I2c_Isr_SlavePhase,
+        .SlavePhaseEnd = I2c_Isr_SlavePhaseEnd,
+    },
+    [I2C_XFER_MODE_POLL] =
+    {
+        .CheckConfig   = I2c_Poll_Check_Config,
+        .Init          = I2c_Poll_XferInit,
+        .Deinit        = I2c_Poll_XferDeinit,
+        .Start         = I2c_Poll_XferStart,
+        .Stop          = I2c_Poll_XferStop,
+        .CheckTxDone   = I2c_Soft_Check_TxDone,
+        .CheckDone     = I2c_None_Xfer,
+        .Listen        = I2c_None_Listen,
+        .SlavePhase    = I2c_None_Xfer,
+        .SlavePhaseEnd = I2c_None_Xfer,
+    },
 };
 
 
@@ -423,8 +534,9 @@ i2c_RequestState_t I2c_Init( const i2c_Config_t * const i2cConfig )
         /*-------------- Peripheral configuration (PE = 0 after reset) -------*/
         if( I2C_REQUEST_OK == retState )
         {
-            /* Own address is not used (master only), OAR1 bit 14 is required by RM */
-            retState = I2c_Set_RegValue( &i2c_PeriphConf[ periphId ].PeriphReg->OAR1, I2C_OAR1_BIT14, I2C_OAR1_BIT14 );
+            /* Role, own addresses and clock stretching (NOSTRETCH requires PE = 0), OAR1 bit 14
+             * is required by RM */
+            retState = I2c_Set_SlaveConfig( periphId, i2cConfig );
         }
         else
         {
@@ -554,12 +666,13 @@ i2c_RequestState_t I2c_Deinit( i2c_PeriphId_t periphId )
  * \brief Main task of module I2c
  *
  * This function shall be called in the main loop of the application or the task scheduler.
- * It moves data of running transfers in I2C_XFER_MODE_POLL.
+ * It moves data of running transfers and of listening slaves in I2C_XFER_MODE_POLL.
  *
- * \note  Master clock stretching holds the bus while the task is not called - no data is lost,
- *        the transfer only takes longer. Single byte reception requires STOP to be programmed
- *        right after the address is acknowledged - an interrupt preempting the task in this
- *        step may lead to reception of one more byte from the slave (discarded).
+ * \note  Clock stretching holds the bus while the task is not called - no data is lost, the
+ *        transfer only takes longer (a slave with clock stretching disabled reports an overrun).
+ *        Single byte reception of the master requires STOP to be programmed right after the
+ *        address is acknowledged - an interrupt preempting the task in this step may lead to
+ *        reception of one more byte from the slave (discarded).
  */
 void I2c_Task( void )
 {
@@ -567,15 +680,16 @@ void I2c_Task( void )
     {
         const i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
 
-        if( ( I2C_FUNCTION_ACTIVE == xferCtx->InitState       ) &&
-            ( I2C_XFER_MODE_POLL  == xferCtx->Config.XferMode ) &&
-            ( I2C_FUNCTION_ACTIVE == xferCtx->XferState       )    )
+        if( ( I2C_FUNCTION_ACTIVE   == xferCtx->InitState         ) &&
+            ( I2C_XFER_MODE_POLL    == xferCtx->Config.XferMode   ) &&
+            ( ( I2C_FUNCTION_ACTIVE == xferCtx->XferState   ) ||
+              ( I2C_FUNCTION_ACTIVE == xferCtx->ListenState )    )    )
         {
             (void)I2c_Poll_Task( periphId );
         }
         else
         {
-            /* No polling transfer is running on the peripheral */
+            /* No polling transfer is running and no polling slave listens on the peripheral */
         }
     }
 }
@@ -585,8 +699,10 @@ void I2c_Task( void )
  * \brief Initialization of configuration structure to default values
  *
  * I2C_PERIPH_1, PCLK clock, 100 kHz, analog filter enabled (disabled on devices without
- * configurable filter), digital filter off, 7-bit addressing, no data handling, pins not
- * configured, no internal pull-up.
+ * configurable filter), digital filter off, 7-bit addressing, master, no data handling, pins not
+ * configured, no internal pull-up. Slave configuration: own address 1 not set (0x00 - must be
+ * set for the slave), 7-bit, own address 2 and general call disabled, clock stretching enabled,
+ * fill byte 0xFF.
  *
  * \param i2cConfig [out]: Pointer to configuration structure. Must not be NULL.
  *
@@ -609,7 +725,18 @@ i2c_RequestState_t I2c_Get_DefaultConfig( i2c_Config_t * const i2cConfig )
 #endif
         i2cConfig->DigitalFilter = I2C_DIGITAL_FILTER_OFF;
         i2cConfig->AddrMode      = I2C_ADDR_MODE_7BIT;
+        i2cConfig->Role          = I2C_ROLE_MASTER;
         i2cConfig->DataConfig    = I2C_NULL_PTR;
+
+        i2cConfig->SlaveConfig.OwnAddr       = I2C_SLAVE_ADDR_GENERAL_CALL;
+        i2cConfig->SlaveConfig.OwnAddrMode   = I2C_ADDR_MODE_7BIT;
+        i2cConfig->SlaveConfig.OwnAddr2State = I2C_FUNCTION_INACTIVE;
+        i2cConfig->SlaveConfig.OwnAddr2      = I2C_SLAVE_ADDR_GENERAL_CALL;
+        i2cConfig->SlaveConfig.OwnAddr2Mask  = I2C_OWN_ADDR2_MASK_NONE;
+        i2cConfig->SlaveConfig.GeneralCall   = I2C_FUNCTION_INACTIVE;
+        i2cConfig->SlaveConfig.ClockStretch  = I2C_CLOCK_STRETCH_ENABLED;
+        i2cConfig->SlaveConfig.FillByte      = I2C_DEFAULT_FILL_BYTE;
+
         i2cConfig->SclPin        = I2C_SCL_PIN_UNUSED;
         i2cConfig->SdaPin        = I2C_SDA_PIN_UNUSED;
         i2cConfig->PinPull       = I2C_PIN_PULL_NONE;
@@ -1278,9 +1405,9 @@ i2c_RequestState_t I2c_Get_DataConfig( i2c_PeriphId_t periphId, i2c_DataConfig_t
  * \note  STOP condition of the previous transfer is generated by HW after its end - the start
  *        waits (bounded) until it is sent.
  *
- * \pre   Peripheral is enabled, data handling is initialized with a transfer mode (not NONE),
- *        no transfer is running and the bus is not busy. Otherwise \ref I2C_REQUEST_ERROR is
- *        returned and no transfer is started.
+ * \pre   Peripheral is a master (\ref I2C_ROLE_MASTER) and enabled, data handling is initialized
+ *        with a transfer mode (not NONE), no transfer is running and the bus is not busy.
+ *        Otherwise \ref I2C_REQUEST_ERROR is returned and no transfer is started.
  *
  * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  * \param xferRequest [in]: Pointer to transfer request (copied, buffers are not). Must not be
@@ -1313,6 +1440,7 @@ i2c_RequestState_t I2c_Set_XferStart( i2c_PeriphId_t periphId, const i2c_XferReq
         const uint32_t            busBusy   = LL_I2C_IsActiveFlag_BUSY( periphReg );
 
         if( ( I2C_FUNCTION_ACTIVE == xferCtx->InitState       ) &&
+            ( I2C_ROLE_MASTER     == xferCtx->Role            ) &&
             ( I2C_XFER_MODE_NONE  != xferCtx->Config.XferMode ) &&
             ( 0u                  != periphEn                 ) &&
             ( I2C_REQUEST_OK      == stopState                ) &&
@@ -1378,7 +1506,7 @@ i2c_RequestState_t I2c_Set_XferStart( i2c_PeriphId_t periphId, const i2c_XferReq
         }
         else
         {
-            /* Data handling is not initialized, peripheral is disabled or bus is busy */
+            /* Data handling is not initialized, slave role, peripheral is disabled or bus is busy */
             retState = I2C_REQUEST_ERROR;
         }
     }
@@ -1477,6 +1605,270 @@ i2c_RequestState_t I2c_Get_XferError( i2c_PeriphId_t periphId, i2c_XferErrorId_t
     {
         *xferError = i2c_XferContext[ periphId ].XferError;
         retState   = I2C_REQUEST_OK;
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* ----------------------------- Slave (listen) ----------------------------- */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * \brief Slave starts listening - own addresses (own address 1, own address 2 and general call
+ *        if configured) are acknowledged, every address match starts a phase with the buffers
+ *
+ * Every phase is reported by SlaveAddrCallback (direction, matched address), the end of the
+ * transfer by SlaveXferCompleteCallback (\ref i2c_SlaveResult_t), errors by ErrorCallback. The
+ * slave listens until I2c_Set_ListenStop() (or until data handling / peripheral deinit).
+ *
+ * \pre   Peripheral is a slave (\ref I2C_ROLE_SLAVE) and enabled, data handling is initialized
+ *        with a transfer mode (not NONE) and the slave does not listen yet. Otherwise
+ *        \ref I2C_REQUEST_ERROR is returned and nothing is modified.
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param slaveBuffer [in]: Pointer to the buffers (copied, buffers are not). Must not be NULL.
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if the slave listens.
+ *         Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Set_ListenStart( i2c_PeriphId_t periphId, const i2c_SlaveBuffer_t * const slaveBuffer )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    retState = I2c_Check_SlaveBuffer( periphId, slaveBuffer );
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        retState = I2c_Check_XferStopped( periphId );
+    }
+    else
+    {
+        /* Buffers are invalid or the peripheral is not a slave */
+    }
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        I2C_TypeDef * const       periphReg = i2c_PeriphConf[ periphId ].PeriphReg;
+        i2c_XferContext_t * const xferCtx   = &i2c_XferContext[ periphId ];
+        const uint32_t            periphEn  = LL_I2C_IsEnabled( periphReg );
+
+        if( ( I2C_FUNCTION_ACTIVE == xferCtx->InitState       ) &&
+            ( I2C_XFER_MODE_NONE  != xferCtx->Config.XferMode ) &&
+            ( 0u                  != periphEn                 )    )
+        {
+            const i2c_XferModeIf_t * const modeIf = &i2c_XferModeLut[ xferCtx->Config.XferMode ];
+
+            xferCtx->SlaveBuffer = *slaveBuffer;
+            xferCtx->SlaveResult = i2c_SlaveResultNone;
+            xferCtx->RxIdx       = 0u;
+            xferCtx->TxIdx       = 0u;
+            xferCtx->TxFillCnt   = 0u;
+            xferCtx->XferError   = I2C_XFER_ERROR_NONE;
+
+            /* Flags of a previous transfer are cleared (rc_w0 bits of SR1, STOPF by SR1 read and CR1 write) */
+            CLEAR_BIT( periphReg->SR1, I2C_SR1_ERROR_FLAGS );
+            LL_I2C_ClearFlag_STOP( periphReg );
+
+            xferCtx->ListenState = I2C_FUNCTION_ACTIVE;
+
+            retState = modeIf->Listen( periphId, I2C_FUNCTION_ACTIVE );
+
+            if( I2C_REQUEST_OK == retState )
+            {
+                retState = I2c_Set_OwnAddrEnable( periphId, I2C_FUNCTION_ACTIVE );
+            }
+            else
+            {
+                /* Interrupt sources of the slave could not be enabled */
+            }
+
+            if( I2C_REQUEST_OK != retState )
+            {
+                /* Slave does not listen - resources are released */
+                (void)I2c_Set_OwnAddrEnable( periphId, I2C_FUNCTION_INACTIVE );
+                (void)modeIf->Listen( periphId, I2C_FUNCTION_INACTIVE );
+                xferCtx->ListenState = I2C_FUNCTION_INACTIVE;
+            }
+            else
+            {
+                /* Slave listens, transfers are processed from the transfer mode context */
+            }
+        }
+        else
+        {
+            /* Data handling is not initialized or peripheral is disabled */
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Slave stops listening - own addresses are not acknowledged any more, a running slave
+ *        transfer is aborted (software reset of the peripheral releases the bus). No callback is
+ *        called.
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems (also if the slave did not listen). Otherwise returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Set_ListenStop( i2c_PeriphId_t periphId )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_PERIPH_CNT > periphId )
+    {
+        i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
+
+        if( I2C_FUNCTION_ACTIVE == xferCtx->ListenState )
+        {
+            const i2c_XferModeIf_t * const modeIf = &i2c_XferModeLut[ xferCtx->Config.XferMode ];
+
+            const i2c_RequestState_t addrState   = I2c_Set_OwnAddrEnable( periphId, I2C_FUNCTION_INACTIVE );
+            const i2c_RequestState_t listenState = modeIf->Listen( periphId, I2C_FUNCTION_INACTIVE );
+            i2c_RequestState_t       abortState  = I2C_REQUEST_OK;
+
+            /* The abort of a running transfer must not enable the own addresses again */
+            xferCtx->ListenState = I2C_FUNCTION_INACTIVE;
+
+            if( I2C_FUNCTION_ACTIVE == xferCtx->XferState )
+            {
+                abortState = I2c_Set_XferAbort( periphId );
+            }
+            else
+            {
+                /* No slave transfer is running */
+            }
+
+            xferCtx->XferError = I2C_XFER_ERROR_NONE;
+
+            if( ( I2C_REQUEST_OK == addrState   ) &&
+                ( I2C_REQUEST_OK == listenState ) &&
+                ( I2C_REQUEST_OK == abortState  )    )
+            {
+                retState = I2C_REQUEST_OK;
+            }
+            else
+            {
+                retState = I2C_REQUEST_ERROR;
+            }
+        }
+        else
+        {
+            /* Slave does not listen */
+            retState = I2C_REQUEST_OK;
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Reads listen state of the slave
+ *
+ * \param periphId     [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param listenState [out]: Pointer to store the state - \ref I2C_FUNCTION_ACTIVE while the slave
+ *                           listens. Must not be NULL.
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Get_ListenState( i2c_PeriphId_t periphId, i2c_FunctionState_t * const listenState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( ( I2C_PERIPH_CNT > periphId    ) &&
+        ( I2C_NULL_PTR  != listenState )    )
+    {
+        *listenState = i2c_XferContext[ periphId ].ListenState;
+        retState     = I2C_REQUEST_OK;
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Replaces the buffers of the slave
+ *
+ * The buffers apply to the next phase. Called from SlaveAddrCallback they apply to the starting
+ * phase - eg. the transmit buffer is selected by the register address received in the write
+ * phase before the repeated START.
+ *
+ * \note  Outside of SlaveAddrCallback the buffers shall be replaced only while no slave transfer
+ *        is running (\ref I2c_Get_XferState).
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param slaveBuffer [in]: Pointer to the buffers (copied, buffers are not). Must not be NULL.
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise (also for a master) returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Set_SlaveBuffer( i2c_PeriphId_t periphId, const i2c_SlaveBuffer_t * const slaveBuffer )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    retState = I2c_Check_SlaveBuffer( periphId, slaveBuffer );
+
+    if( I2C_REQUEST_OK == retState )
+    {
+        i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
+
+        xferCtx->SlaveBuffer = *slaveBuffer;
+    }
+    else
+    {
+        /* Buffers are invalid or the peripheral is not a slave */
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Reads result of the last finished slave transfer
+ *
+ * \param periphId     [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param slaveResult [out]: Pointer to store the result. Must not be NULL.
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise (also for a master) returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Get_SlaveResult( i2c_PeriphId_t periphId, i2c_SlaveResult_t * const slaveResult )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( ( I2C_PERIPH_CNT  > periphId                          ) &&
+        ( I2C_NULL_PTR   != slaveResult                       ) &&
+        ( I2C_ROLE_SLAVE == i2c_XferContext[ periphId ].Role )    )
+    {
+        *slaveResult = i2c_XferContext[ periphId ].SlaveLast;
+        retState     = I2C_REQUEST_OK;
     }
     else
     {
@@ -1875,6 +2267,27 @@ i2c_RequestState_t I2c_Set_XferError( i2c_PeriphId_t periphId, i2c_XferErrorId_t
             retState = I2C_REQUEST_OK;
         }
 
+        if( ( I2C_ROLE_SLAVE      == xferCtx->Role        ) &&
+            ( I2C_FUNCTION_ACTIVE == xferCtx->ListenState )    )
+        {
+            /* The abort disabled the interrupt sources of the mode - the slave keeps listening */
+            const i2c_XferModeIf_t * const modeIf      = &i2c_XferModeLut[ xferCtx->Config.XferMode ];
+            const i2c_RequestState_t       listenState = modeIf->Listen( periphId, I2C_FUNCTION_ACTIVE );
+
+            if( I2C_REQUEST_OK != listenState )
+            {
+                retState = I2C_REQUEST_ERROR;
+            }
+            else
+            {
+                /* Slave listens */
+            }
+        }
+        else
+        {
+            /* Master or the slave does not listen */
+        }
+
         xferCtx->XferError = errorId;
 
         if( I2C_NULL_PTR != xferCtx->Config.ErrorCallback )
@@ -1884,6 +2297,66 @@ i2c_RequestState_t I2c_Set_XferError( i2c_PeriphId_t periphId, i2c_XferErrorId_t
         else
         {
             /* Error callback is not used */
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Processes events of the listening slave (all modes) in the order of the bus:
+ *        errors, received byte, NACK of the master, STOP (end of the transfer), address match
+ *        (start of a phase) and byte to be transmitted
+ *
+ * \note  A byte to be transmitted is not written in the call which processed the address match
+ *        - TXE of the starting read phase is processed by the next call.
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Set_SlaveEvents( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_PERIPH_CNT > periphId )
+    {
+        const i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
+
+        if( I2C_FUNCTION_ACTIVE == xferCtx->ListenState )
+        {
+            const i2c_RequestState_t errState  = I2c_Set_SlaveErrors( periphId, isrFlags );
+            const i2c_RequestState_t rxState   = I2c_Set_SlaveRxByte( periphId, isrFlags );
+            const i2c_RequestState_t nackState = I2c_Set_SlaveNack( periphId, isrFlags );
+            const i2c_RequestState_t stopState = I2c_Set_SlaveStop( periphId, isrFlags );
+            const i2c_RequestState_t addrState = I2c_Set_SlaveAddrMatch( periphId, isrFlags );
+            const i2c_RequestState_t txState   = I2c_Set_SlaveTxByte( periphId, isrFlags );
+
+            if( ( I2C_REQUEST_OK == errState  ) &&
+                ( I2C_REQUEST_OK == rxState   ) &&
+                ( I2C_REQUEST_OK == nackState ) &&
+                ( I2C_REQUEST_OK == stopState ) &&
+                ( I2C_REQUEST_OK == addrState ) &&
+                ( I2C_REQUEST_OK == txState   )    )
+            {
+                retState = I2C_REQUEST_OK;
+            }
+            else
+            {
+                retState = I2C_REQUEST_ERROR;
+            }
+        }
+        else
+        {
+            /* Slave does not listen */
+            retState = I2C_REQUEST_OK;
         }
     }
     else
@@ -1917,10 +2390,13 @@ static i2c_RequestState_t I2c_Check_Config( const i2c_Config_t * const i2cConfig
         ( I2C_ANALOG_FILTER_CNT   > i2cConfig->AnalogFilter  ) &&
         ( I2C_DIGITAL_FILTER_CNT  > i2cConfig->DigitalFilter ) &&
         ( I2C_ADDR_MODE_CNT       > i2cConfig->AddrMode      ) &&
+        ( I2C_ROLE_CNT            > i2cConfig->Role          ) &&
         ( I2C_PIN_PULL_CNT        > i2cConfig->PinPull       )    )
     {
         const i2c_RequestState_t sclState = I2c_Check_Pin( i2cConfig->PeriphId, (i2c_PinCode_t)i2cConfig->SclPin, (i2c_PinCode_t)I2C_SCL_PIN_UNUSED );
         const i2c_RequestState_t sdaState = I2c_Check_Pin( i2cConfig->PeriphId, (i2c_PinCode_t)i2cConfig->SdaPin, (i2c_PinCode_t)I2C_SDA_PIN_UNUSED );
+
+        const i2c_RequestState_t slaveState = I2c_Check_SlaveConfig( i2cConfig );
 
 #if defined(I2C_FLTR_ANOFF)
         const i2c_RequestState_t fltState = I2C_REQUEST_OK;
@@ -1938,15 +2414,16 @@ static i2c_RequestState_t I2c_Check_Config( const i2c_Config_t * const i2cConfig
         }
 #endif
 
-        if( ( I2C_REQUEST_OK == sclState ) &&
-            ( I2C_REQUEST_OK == sdaState ) &&
-            ( I2C_REQUEST_OK == fltState )    )
+        if( ( I2C_REQUEST_OK == sclState   ) &&
+            ( I2C_REQUEST_OK == sdaState   ) &&
+            ( I2C_REQUEST_OK == slaveState ) &&
+            ( I2C_REQUEST_OK == fltState   )    )
         {
             retState = I2C_REQUEST_OK;
         }
         else
         {
-            /* Pin configuration is incomplete or filter is not supported */
+            /* Pin configuration is incomplete, slave configuration is invalid or filter is not supported */
             retState = I2C_REQUEST_ERROR;
         }
     }
@@ -2037,7 +2514,8 @@ static i2c_RequestState_t I2c_Check_PeriphDisabled( i2c_PeriphId_t periphId )
 
 
 /**
- * \brief Checks that no transfer is running and no START condition is pending
+ * \brief Checks that no transfer is running, the slave does not listen and no START condition is
+ *        pending
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  *
@@ -2052,14 +2530,15 @@ static i2c_RequestState_t I2c_Check_XferStopped( i2c_PeriphId_t periphId )
     {
         const uint32_t startPending = READ_BIT( i2c_PeriphConf[ periphId ].PeriphReg->CR1, I2C_CR1_START );
 
-        if( ( I2C_FUNCTION_INACTIVE == i2c_XferContext[ periphId ].XferState ) &&
-            ( 0u                    == startPending                          )    )
+        if( ( I2C_FUNCTION_INACTIVE == i2c_XferContext[ periphId ].XferState   ) &&
+            ( I2C_FUNCTION_INACTIVE == i2c_XferContext[ periphId ].ListenState ) &&
+            ( 0u                    == startPending                            )    )
         {
             retState = I2C_REQUEST_OK;
         }
         else
         {
-            /* Transfer is running */
+            /* Transfer is running or the slave listens */
             retState = I2C_REQUEST_ERROR;
         }
     }
@@ -2561,7 +3040,20 @@ static i2c_RequestState_t I2c_Set_XferDeinit( i2c_PeriphId_t periphId )
 
         if( I2C_FUNCTION_ACTIVE == xferCtx->InitState )
         {
-            i2c_RequestState_t abortState = I2C_REQUEST_OK;
+            i2c_RequestState_t abortState  = I2C_REQUEST_OK;
+            i2c_RequestState_t listenState = I2C_REQUEST_OK;
+
+            if( I2C_FUNCTION_ACTIVE == xferCtx->ListenState )
+            {
+                /* Own addresses are not acknowledged without data handling */
+                listenState = I2c_Set_OwnAddrEnable( periphId, I2C_FUNCTION_INACTIVE );
+
+                xferCtx->ListenState = I2C_FUNCTION_INACTIVE;
+            }
+            else
+            {
+                /* Slave does not listen */
+            }
 
             if( I2C_FUNCTION_ACTIVE == xferCtx->XferState )
             {
@@ -2577,7 +3069,8 @@ static i2c_RequestState_t I2c_Set_XferDeinit( i2c_PeriphId_t periphId )
 
             xferCtx->InitState = I2C_FUNCTION_INACTIVE;
 
-            if( ( I2C_REQUEST_OK == abortState  ) &&
+            if( ( I2C_REQUEST_OK == listenState ) &&
+                ( I2C_REQUEST_OK == abortState  ) &&
                 ( I2C_REQUEST_OK == deinitState ) &&
                 ( I2C_REQUEST_OK == irqState    )    )
             {
@@ -3231,8 +3724,8 @@ static i2c_RequestState_t I2c_Set_XferAbort( i2c_PeriphId_t periphId )
 
 /**
  * \brief Software reset of the peripheral (SWRST) - I2C state machine, flags and all registers
- *        are reset, the configuration (CR2 FREQ, CCR, TRISE, FLTR, OAR1) is restored and the
- *        peripheral is enabled again
+ *        are reset, the configuration (CR2 FREQ, CCR, TRISE, FLTR, OAR1, OAR2, NOSTRETCH) is
+ *        restored and the peripheral is enabled again (a listening slave answers again)
  *
  * \note  Clearing of PE does not reset a running communication on I2C v1 (PE is cleared at the
  *        end of the communication) - SWRST releases the bus lines immediately.
@@ -3253,6 +3746,8 @@ static i2c_RequestState_t I2c_Set_PeriphReset( i2c_PeriphId_t periphId )
         const uint32_t      ccrReg    = READ_REG( periphReg->CCR );
         const uint32_t      triseReg  = READ_REG( periphReg->TRISE );
         const uint32_t      oar1Reg   = READ_REG( periphReg->OAR1 );
+        const uint32_t      oar2Reg   = READ_BIT( periphReg->OAR2, I2C_OAR2_CONFIG_MASK );
+        const uint32_t      cr1Slave  = READ_BIT( periphReg->CR1, I2C_CR1_SLAVE_MASK );
 #if defined(I2C_FLTR_ANOFF)
         const uint32_t      fltrReg   = READ_REG( periphReg->FLTR );
 #endif
@@ -3304,6 +3799,24 @@ static i2c_RequestState_t I2c_Set_PeriphReset( i2c_PeriphId_t periphId )
             /* Configuration could not be restored */
         }
 
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Set_RegValue( &periphReg->OAR2, I2C_OAR2_CONFIG_MASK, oar2Reg );
+        }
+        else
+        {
+            /* Configuration could not be restored */
+        }
+
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Set_RegValue( &periphReg->CR1, I2C_CR1_SLAVE_MASK, cr1Slave );
+        }
+        else
+        {
+            /* Configuration could not be restored */
+        }
+
 #if defined(I2C_FLTR_ANOFF)
         if( I2C_REQUEST_OK == retState )
         {
@@ -3322,6 +3835,17 @@ static i2c_RequestState_t I2c_Set_PeriphReset( i2c_PeriphId_t periphId )
         else
         {
             /* Configuration could not be restored */
+        }
+
+        if( ( I2C_REQUEST_OK      == retState                                  ) &&
+            ( I2C_FUNCTION_ACTIVE == i2c_XferContext[ periphId ].ListenState )    )
+        {
+            /* A listening slave acknowledges its addresses again */
+            retState = I2c_Set_OwnAddrEnable( periphId, I2C_FUNCTION_ACTIVE );
+        }
+        else
+        {
+            /* Previous step failed or the slave does not listen */
         }
     }
     else
@@ -3511,6 +4035,780 @@ static i2c_RequestState_t I2c_Soft_Check_TxDone( i2c_PeriphId_t periphId )
     else
     {
         retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Listen handler without resources (NONE and POLL mode - the slave events are polled by
+ *        I2c_Task())
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param listenState [in]: Listen started / stopped, value from \ref i2c_FunctionState_t
+ *
+ * \return Returns \ref I2C_REQUEST_OK for a valid periphId. Otherwise returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_None_Listen( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    (void)listenState;
+
+    if( I2C_PERIPH_CNT > periphId )
+    {
+        retState = I2C_REQUEST_OK;
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/* -------------------------------------------------------------------------- */
+/* --------------------------------- Slave ---------------------------------- */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * \brief Checks slave part of the configuration (a master configuration is not checked)
+ *
+ * \note  I2C v1 compares all bits of own address 2 (no mask) and recognizes own address 2 only
+ *        together with a 7-bit own address 1 - the other combinations are refused.
+ *
+ * \param i2cConfig [in]: Pointer to configuration structure
+ *
+ * \return Returns \ref I2C_REQUEST_OK if the configuration is valid. Otherwise returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Check_SlaveConfig( const i2c_Config_t * const i2cConfig )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_ROLE_SLAVE != i2cConfig->Role )
+    {
+        /* Master - slave configuration is not used */
+        retState = I2C_REQUEST_OK;
+    }
+    else
+    {
+        const i2c_SlaveConfig_t * const slaveConfig = &i2cConfig->SlaveConfig;
+
+        if( ( I2C_ADDR_MODE_CNT        > slaveConfig->OwnAddrMode   ) &&
+            ( I2C_FUNCTION_ACTIVE     >= slaveConfig->OwnAddr2State ) &&
+            ( I2C_OWN_ADDR2_MASK_NONE == slaveConfig->OwnAddr2Mask  ) &&
+            ( I2C_FUNCTION_ACTIVE     >= slaveConfig->GeneralCall   ) &&
+            ( I2C_CLOCK_STRETCH_CNT    > slaveConfig->ClockStretch  )    )
+        {
+            retState = I2c_Check_OwnAddr( slaveConfig->OwnAddr, slaveConfig->OwnAddrMode );
+        }
+        else
+        {
+            retState = I2C_REQUEST_ERROR;
+        }
+
+        if( ( I2C_REQUEST_OK      == retState                   ) &&
+            ( I2C_FUNCTION_ACTIVE == slaveConfig->OwnAddr2State ) &&
+            ( I2C_ADDR_MODE_7BIT  == slaveConfig->OwnAddrMode   )    )
+        {
+            retState = I2c_Check_OwnAddr( slaveConfig->OwnAddr2, I2C_ADDR_MODE_7BIT );
+        }
+        else if( ( I2C_REQUEST_OK      == retState                   ) &&
+                 ( I2C_FUNCTION_ACTIVE == slaveConfig->OwnAddr2State )    )
+        {
+            /* Own address 2 requires a 7-bit own address 1 */
+            retState = I2C_REQUEST_ERROR;
+        }
+        else
+        {
+            /* Configuration is invalid or own address 2 is not used */
+        }
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Checks own address of the slave - 7-bit address out of the reserved groups, 10-bit
+ *        address in range
+ *
+ * \param ownAddr  [in]: Own address (not shifted)
+ * \param addrMode [in]: Addressing mode of the address, value from \ref i2c_AddrMode_t
+ *
+ * \return Returns \ref I2C_REQUEST_OK if the address is valid. Otherwise returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Check_OwnAddr( i2c_SlaveAddr_t ownAddr, i2c_AddrMode_t addrMode )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_ADDR_MODE_10BIT == addrMode )
+    {
+        if( I2C_SLAVE_ADDR_10BIT_MAX >= ownAddr )
+        {
+            retState = I2C_REQUEST_OK;
+        }
+        else
+        {
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else if( ( I2C_SLAVE_ADDR_7BIT_RESERVED_LOW   < ownAddr ) &&
+             ( I2C_SLAVE_ADDR_7BIT_RESERVED_HIGH  > ownAddr )    )
+    {
+        retState = I2C_REQUEST_OK;
+    }
+    else
+    {
+        /* Reserved 7-bit address or out of range */
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Checks buffers of the slave - the peripheral is a slave, a buffer is given for every
+ *        non-zero size
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param slaveBuffer [in]: Pointer to the buffers
+ *
+ * \return Returns \ref I2C_REQUEST_OK if the buffers are valid. Otherwise returns
+ *         \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Check_SlaveBuffer( i2c_PeriphId_t periphId, const i2c_SlaveBuffer_t * const slaveBuffer )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( ( I2C_PERIPH_CNT  > periphId                          ) &&
+        ( I2C_NULL_PTR   != slaveBuffer                       ) &&
+        ( I2C_ROLE_SLAVE == i2c_XferContext[ periphId ].Role )    )
+    {
+        if( ( ( 0u           == slaveBuffer->RxSize ) ||
+              ( I2C_NULL_PTR != slaveBuffer->RxData )    ) &&
+            ( ( 0u           == slaveBuffer->TxSize ) ||
+              ( I2C_NULL_PTR != slaveBuffer->TxData )    )    )
+        {
+            retState = I2C_REQUEST_OK;
+        }
+        else
+        {
+            /* Missing buffer */
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Configures the role of the peripheral (PE = 0): own addresses of a slave are written
+ *        (acknowledged after I2c_Set_ListenStart()), clock stretching is configured; a master
+ *        gets own addresses disabled and clock stretching enabled
+ *
+ * \param periphId  [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param i2cConfig [in]: Pointer to checked configuration structure
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveConfig( i2c_PeriphId_t periphId, const i2c_Config_t * const i2cConfig )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( ( I2C_PERIPH_CNT  > periphId  ) &&
+        ( I2C_NULL_PTR   != i2cConfig )    )
+    {
+        I2C_TypeDef * const             periphReg   = i2c_PeriphConf[ periphId ].PeriphReg;
+        i2c_XferContext_t * const       xferCtx     = &i2c_XferContext[ periphId ];
+        const i2c_SlaveConfig_t * const slaveConfig = &i2cConfig->SlaveConfig;
+        uint32_t                        oar1Value   = I2C_OAR1_BIT14;
+        uint32_t                        oar2Value   = 0u;
+        uint32_t                        cr1Value    = 0u;
+
+        if( I2C_ROLE_SLAVE == i2cConfig->Role )
+        {
+            if( I2C_ADDR_MODE_10BIT == slaveConfig->OwnAddrMode )
+            {
+                oar1Value |= I2C_OAR1_ADDMODE | ( (uint32_t)slaveConfig->OwnAddr & I2C_SLAVE_ADDR_10BIT_MAX );
+            }
+            else
+            {
+                oar1Value |= ( (uint32_t)slaveConfig->OwnAddr << I2C_OWN_ADDR_7BIT_SHIFT ) & I2C_OAR1_ADD1_7;
+            }
+
+            oar2Value = ( (uint32_t)slaveConfig->OwnAddr2 << I2C_OWN_ADDR_7BIT_SHIFT ) & I2C_OAR2_ADD2;
+
+            if( I2C_CLOCK_STRETCH_DISABLED == slaveConfig->ClockStretch )
+            {
+                cr1Value = I2C_CR1_NOSTRETCH;
+            }
+            else
+            {
+                /* Clock stretching enabled */
+            }
+
+            xferCtx->FillByte      = slaveConfig->FillByte;
+            xferCtx->OwnAddr       = slaveConfig->OwnAddr;
+            xferCtx->OwnAddr2      = slaveConfig->OwnAddr2;
+            xferCtx->OwnAddr2State = slaveConfig->OwnAddr2State;
+            xferCtx->GeneralCall   = slaveConfig->GeneralCall;
+        }
+        else
+        {
+            /* Master - own addresses disabled, clock stretching enabled */
+            xferCtx->OwnAddr2State = I2C_FUNCTION_INACTIVE;
+            xferCtx->GeneralCall   = I2C_FUNCTION_INACTIVE;
+        }
+
+        xferCtx->Role        = i2cConfig->Role;
+        xferCtx->ListenState = I2C_FUNCTION_INACTIVE;
+        xferCtx->SlaveLast   = i2c_SlaveResultNone;
+
+        /* Own address 1 with the bit 14 required by RM, own address 2 (ENDUAL is set by the listen start) */
+        retState = I2c_Set_RegValue( &periphReg->OAR1, I2C_OAR1_CONFIG_MASK, oar1Value );
+
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Set_RegValue( &periphReg->OAR2, I2C_OAR2_CONFIG_MASK, oar2Value );
+        }
+        else
+        {
+            /* Own address 1 could not be written */
+        }
+
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Set_RegValue( &periphReg->CR1, I2C_CR1_SLAVE_MASK, cr1Value );
+        }
+        else
+        {
+            /* Own address 2 could not be written */
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Enables / disables acknowledging of the own addresses of the slave - ACK (address and
+ *        data), ENDUAL and ENGC (as configured) with read-back verification
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param enableState [in]: Required state, value from \ref i2c_FunctionState_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_OwnAddrEnable( i2c_PeriphId_t periphId, i2c_FunctionState_t enableState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_PERIPH_CNT > periphId )
+    {
+        I2C_TypeDef * const             periphReg = i2c_PeriphConf[ periphId ].PeriphReg;
+        const i2c_XferContext_t * const xferCtx   = &i2c_XferContext[ periphId ];
+        uint32_t                        cr1Value  = 0u;
+        uint32_t                        oar2Value = 0u;
+
+        if( I2C_FUNCTION_ACTIVE == enableState )
+        {
+            cr1Value = I2C_CR1_ACK;
+        }
+        else
+        {
+            /* Own addresses are not acknowledged */
+        }
+
+        if( ( I2C_FUNCTION_ACTIVE == enableState            ) &&
+            ( I2C_FUNCTION_ACTIVE == xferCtx->OwnAddr2State )    )
+        {
+            oar2Value = I2C_OAR2_ENDUAL;
+        }
+        else
+        {
+            /* Own address 2 is disabled */
+        }
+
+        if( ( I2C_FUNCTION_ACTIVE == enableState          ) &&
+            ( I2C_FUNCTION_ACTIVE == xferCtx->GeneralCall )    )
+        {
+            cr1Value |= I2C_CR1_ENGC;
+        }
+        else
+        {
+            /* General call is disabled */
+        }
+
+        /* Dual addressing is switched before ACK */
+        retState = I2c_Set_RegValue( &periphReg->OAR2, I2C_OAR2_ENDUAL, oar2Value );
+
+        if( I2C_REQUEST_OK == retState )
+        {
+            retState = I2c_Set_RegValue( &periphReg->CR1, I2C_CR1_LISTEN_MASK, cr1Value );
+        }
+        else
+        {
+            /* Own address 2 could not be switched */
+        }
+    }
+    else
+    {
+        retState = I2C_REQUEST_ERROR;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Slave errors (BERR, ARLO, OVR) - flags are cleared, the running transfer ends without
+ *        result, ErrorCallback is called. The slave keeps listening (bus lines are released by
+ *        HW).
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveErrors( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_OK;
+
+    if( 0u != ( I2C_SR1_SLAVE_ERROR_MASK & isrFlags ) )
+    {
+        I2C_TypeDef * const       periphReg = i2c_PeriphConf[ periphId ].PeriphReg;
+        i2c_XferContext_t * const xferCtx   = &i2c_XferContext[ periphId ];
+        i2c_XferErrorId_t         errorId   = I2C_XFER_ERROR_OVERRUN;
+
+        if( 0u != ( I2C_SR1_BERR & isrFlags ) )
+        {
+            errorId = I2C_XFER_ERROR_BUS;
+        }
+        else if( 0u != ( I2C_SR1_ARLO & isrFlags ) )
+        {
+            errorId = I2C_XFER_ERROR_ARBITRATION_LOST;
+        }
+        else
+        {
+            /* Overrun / underrun (clock stretching disabled) */
+        }
+
+        LL_I2C_ClearFlag_BERR( periphReg );
+        LL_I2C_ClearFlag_ARLO( periphReg );
+        LL_I2C_ClearFlag_OVR( periphReg );
+
+        if( I2C_FUNCTION_ACTIVE == xferCtx->XferState )
+        {
+            retState = i2c_XferModeLut[ xferCtx->Config.XferMode ].SlavePhaseEnd( periphId );
+
+            xferCtx->XferState = I2C_FUNCTION_INACTIVE;
+        }
+        else
+        {
+            /* No slave transfer is running */
+        }
+
+        xferCtx->XferError = errorId;
+
+        if( I2C_NULL_PTR != xferCtx->Config.ErrorCallback )
+        {
+            xferCtx->Config.ErrorCallback( errorId );
+        }
+        else
+        {
+            /* Error callback is not used */
+        }
+    }
+    else
+    {
+        /* No slave error */
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Received byte of the slave (ISR / POLL mode, DMA mode beyond the buffer) - stored into
+ *        RxData or discarded beyond RxSize
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveRxByte( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    I2C_TypeDef * const       periphReg = i2c_PeriphConf[ periphId ].PeriphReg;
+    i2c_XferContext_t * const xferCtx   = &i2c_XferContext[ periphId ];
+    const uint32_t            rxDmaEn   = LL_I2C_IsEnabledDMAReq_RX( periphReg );
+
+    /* Reading of DR clears RXNE - a byte moved by DMA is not read */
+    if( ( 0u != ( I2C_SR1_RXNE & isrFlags ) ) &&
+        ( 0u == rxDmaEn                      )    )
+    {
+        const i2c_Data_t    rxData = LL_I2C_ReceiveData8( periphReg );
+        const i2c_DataCnt_t rxIdx  = xferCtx->RxIdx;
+
+        if( ( I2C_FUNCTION_ACTIVE         == xferCtx->XferState ) &&
+            ( xferCtx->SlaveBuffer.RxSize  > rxIdx              )    )
+        {
+            xferCtx->SlaveBuffer.RxData[ rxIdx ] = rxData;
+            xferCtx->RxIdx                       = rxIdx + 1u;
+        }
+        else if( I2C_FUNCTION_ACTIVE == xferCtx->XferState )
+        {
+            /* Byte beyond the buffer is discarded */
+            xferCtx->SlaveResult.RxBeyondBuffer = I2C_FLAG_ACTIVE;
+        }
+        else
+        {
+            /* Byte out of a slave transfer is discarded */
+        }
+    }
+    else
+    {
+        /* No received byte or byte moved by DMA */
+    }
+
+    return ( I2C_REQUEST_OK );
+}
+
+
+/**
+ * \brief Byte to be transmitted by the slave (ISR / POLL mode, DMA mode beyond the buffer) -
+ *        next byte of TxData or FillByte beyond TxSize
+ *
+ * \note  The byte is written in advance (DR is empty while the previous byte is shifted out) - a
+ *        byte not sent to the master is subtracted at the end of the phase.
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveTxByte( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    I2C_TypeDef * const       periphReg = i2c_PeriphConf[ periphId ].PeriphReg;
+    i2c_XferContext_t * const xferCtx   = &i2c_XferContext[ periphId ];
+    const uint32_t            txDmaEn   = LL_I2C_IsEnabledDMAReq_TX( periphReg );
+
+    if( ( 0u                  != ( I2C_SR1_TXE  & isrFlags ) ) &&
+        ( 0u                  == ( I2C_SR1_ADDR & isrFlags ) ) &&
+        ( 0u                  == txDmaEn                       ) &&
+        ( I2C_FUNCTION_ACTIVE == xferCtx->XferState            ) &&
+        ( I2C_SLAVE_DIR_READ  == xferCtx->SlaveDir             )    )
+    {
+        const i2c_DataCnt_t txIdx = xferCtx->TxIdx;
+
+        if( xferCtx->SlaveBuffer.TxSize > txIdx )
+        {
+            LL_I2C_TransmitData8( periphReg, xferCtx->SlaveBuffer.TxData[ txIdx ] );
+            xferCtx->TxIdx = txIdx + 1u;
+        }
+        else
+        {
+            /* Master reads beyond the buffer */
+            LL_I2C_TransmitData8( periphReg, xferCtx->FillByte );
+            xferCtx->TxFillCnt = xferCtx->TxFillCnt + 1u;
+        }
+    }
+    else
+    {
+        /* No byte requested, address match processed in this call, byte moved by DMA or the transfer ended */
+    }
+
+    return ( I2C_REQUEST_OK );
+}
+
+
+/**
+ * \brief NACK of the master (AF) - the master does not read further bytes, the read phase and
+ *        the transfer end (STOPF is not set after a NACK), the result is stored and
+ *        SlaveXferCompleteCallback is called
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveNack( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_OK;
+
+    if( 0u != ( I2C_SR1_AF & isrFlags ) )
+    {
+        const i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
+
+        LL_I2C_ClearFlag_AF( i2c_PeriphConf[ periphId ].PeriphReg );
+
+        if( ( I2C_FUNCTION_ACTIVE == xferCtx->XferState ) &&
+            ( I2C_SLAVE_DIR_READ  == xferCtx->SlaveDir  )    )
+        {
+            retState = I2c_Set_SlaveEnd( periphId );
+        }
+        else
+        {
+            /* NACK out of a read phase is ignored */
+        }
+    }
+    else
+    {
+        /* No NACK of the master */
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief STOP condition - the running slave transfer ends (after a write phase), the result is
+ *        stored and SlaveXferCompleteCallback is called
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveStop( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_OK;
+
+    if( 0u != ( I2C_SR1_STOPF & isrFlags ) )
+    {
+        const i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
+
+        /* SR1 read followed by a write of CR1 */
+        LL_I2C_ClearFlag_STOP( i2c_PeriphConf[ periphId ].PeriphReg );
+
+        if( I2C_FUNCTION_ACTIVE == xferCtx->XferState )
+        {
+            retState = I2c_Set_SlaveEnd( periphId );
+        }
+        else
+        {
+            /* Transfer was already ended by a NACK or an error */
+        }
+    }
+    else
+    {
+        /* No STOP condition */
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Address match - the running phase ends (repeated START) or a transfer starts, SR2 is
+ *        read (clears ADDR, gives the direction and the matched address), the direction and the
+ *        matched address are reported by SlaveAddrCallback and the phase is prepared
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param isrFlags [in]: Snapshot of I2C SR1 register
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveAddrMatch( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_OK;
+
+    if( 0u != ( I2C_SR1_ADDR & isrFlags ) )
+    {
+        I2C_TypeDef * const       periphReg   = i2c_PeriphConf[ periphId ].PeriphReg;
+        i2c_XferContext_t * const xferCtx     = &i2c_XferContext[ periphId ];
+        i2c_SlaveAddr_t           matchedAddr = xferCtx->OwnAddr;
+        i2c_SlaveDir_t            slaveDir    = I2C_SLAVE_DIR_WRITE;
+        i2c_RequestState_t        closeState  = I2C_REQUEST_OK;
+
+        /* Read of SR1 followed by read of SR2 clears ADDR (SCL is released) */
+        (void)LL_I2C_ReadReg( periphReg, SR1 );
+        const uint32_t sr2Flags = LL_I2C_ReadReg( periphReg, SR2 );
+
+        if( I2C_FUNCTION_ACTIVE == xferCtx->XferState )
+        {
+            /* Repeated START - the running phase ends */
+            closeState = I2c_Set_SlavePhaseClose( periphId );
+        }
+        else
+        {
+            /* New transfer */
+            xferCtx->SlaveResult = i2c_SlaveResultNone;
+            xferCtx->RxIdx       = 0u;
+            xferCtx->TxIdx       = 0u;
+            xferCtx->TxFillCnt   = 0u;
+            xferCtx->XferError   = I2C_XFER_ERROR_NONE;
+            xferCtx->XferState   = I2C_FUNCTION_ACTIVE;
+        }
+
+        if( 0u != ( I2C_SR2_GENCALL & sr2Flags ) )
+        {
+            matchedAddr = I2C_SLAVE_ADDR_GENERAL_CALL;
+        }
+        else if( 0u != ( I2C_SR2_DUALF & sr2Flags ) )
+        {
+            matchedAddr = xferCtx->OwnAddr2;
+        }
+        else
+        {
+            /* Own address 1 (7-bit or 10-bit) */
+        }
+
+        if( 0u != ( I2C_SR2_TRA & sr2Flags ) )
+        {
+            slaveDir = I2C_SLAVE_DIR_READ;
+
+            xferCtx->TxIdx     = 0u;
+            xferCtx->TxFillCnt = 0u;
+        }
+        else
+        {
+            slaveDir = I2C_SLAVE_DIR_WRITE;
+
+            xferCtx->RxIdx                      = 0u;
+            xferCtx->SlaveResult.RxBeyondBuffer = I2C_FLAG_INACTIVE;
+        }
+
+        xferCtx->SlaveDir                = slaveDir;
+        xferCtx->SlaveResult.MatchedAddr = matchedAddr;
+
+        if( I2C_NULL_PTR != xferCtx->Config.SlaveAddrCallback )
+        {
+            xferCtx->Config.SlaveAddrCallback( slaveDir, matchedAddr );
+        }
+        else
+        {
+            /* Slave address callback is not used */
+        }
+
+        const i2c_RequestState_t phaseState = i2c_XferModeLut[ xferCtx->Config.XferMode ].SlavePhase( periphId );
+
+        if( ( I2C_REQUEST_OK == closeState ) &&
+            ( I2C_REQUEST_OK == phaseState )    )
+        {
+            retState = I2C_REQUEST_OK;
+        }
+        else
+        {
+            retState = I2C_REQUEST_ERROR;
+        }
+    }
+    else
+    {
+        /* No address match */
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Ends the running slave phase - transfer mode resources of the phase are stopped, the
+ *        byte written in advance to DR and not sent to the master is subtracted (read phase),
+ *        the count of the phase is stored in the result
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlavePhaseClose( i2c_PeriphId_t periphId )
+{
+    I2C_TypeDef * const       periphReg = i2c_PeriphConf[ periphId ].PeriphReg;
+    i2c_XferContext_t * const xferCtx   = &i2c_XferContext[ periphId ];
+
+    const i2c_RequestState_t retState = i2c_XferModeLut[ xferCtx->Config.XferMode ].SlavePhaseEnd( periphId );
+
+    if( I2C_SLAVE_DIR_READ == xferCtx->SlaveDir )
+    {
+        const uint32_t txEmpty = LL_I2C_IsActiveFlag_TXE( periphReg );
+
+        if( 0u != txEmpty )
+        {
+            /* Every written byte was taken over by the shift register */
+        }
+        else if( 0u < xferCtx->TxFillCnt )
+        {
+            xferCtx->TxFillCnt = xferCtx->TxFillCnt - 1u;
+        }
+        else if( 0u < xferCtx->TxIdx )
+        {
+            xferCtx->TxIdx = xferCtx->TxIdx - 1u;
+        }
+        else
+        {
+            /* No byte was written in the phase */
+        }
+
+        xferCtx->SlaveResult.TxCnt = xferCtx->TxIdx;
+
+        if( 0u < xferCtx->TxFillCnt )
+        {
+            xferCtx->SlaveResult.TxBeyondBuffer = I2C_FLAG_ACTIVE;
+        }
+        else
+        {
+            xferCtx->SlaveResult.TxBeyondBuffer = I2C_FLAG_INACTIVE;
+        }
+    }
+    else
+    {
+        xferCtx->SlaveResult.RxCnt = xferCtx->RxIdx;
+    }
+
+    return ( retState );
+}
+
+
+/**
+ * \brief Ends the running slave transfer - the last phase is closed, the result is stored and
+ *        SlaveXferCompleteCallback is called
+ *
+ * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+static i2c_RequestState_t I2c_Set_SlaveEnd( i2c_PeriphId_t periphId )
+{
+    i2c_XferContext_t * const xferCtx = &i2c_XferContext[ periphId ];
+
+    const i2c_RequestState_t retState = I2c_Set_SlavePhaseClose( periphId );
+
+    xferCtx->SlaveLast = xferCtx->SlaveResult;
+    xferCtx->XferState = I2C_FUNCTION_INACTIVE;
+
+    if( I2C_NULL_PTR != xferCtx->Config.SlaveXferCompleteCallback )
+    {
+        xferCtx->Config.SlaveXferCompleteCallback( &xferCtx->SlaveLast );
+    }
+    else
+    {
+        /* Slave transfer complete callback is not used */
     }
 
     return ( retState );

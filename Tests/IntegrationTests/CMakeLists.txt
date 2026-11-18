@@ -20,7 +20,7 @@ IntegrationTesting_Add_Test(
     TEST_SOURCE     ItTest_I2c.c
     SOURCES         ItTarget_I2c.c      # Target interface of the test set
     LINK_LIBS       StartUp_Lib         # Startup code (calls BspMain)
-                    Nvic_Lib            # Fault handlers, system reset (ItTarget), slave interrupt
+                    Nvic_Lib            # Fault handlers, system reset (ItTarget)
                     I2c_Lib             # Module under test
     TIMEOUT         60
 )

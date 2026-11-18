@@ -51,6 +51,10 @@ i2c_RequestState_t I2c_Isr_XferDeinit   ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Isr_XferStart    ( i2c_PeriphId_t periphId );
 i2c_RequestState_t I2c_Isr_XferStop     ( i2c_PeriphId_t periphId );
 
+i2c_RequestState_t I2c_Isr_Listen        ( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState );
+i2c_RequestState_t I2c_Isr_SlavePhase    ( i2c_PeriphId_t periphId );
+i2c_RequestState_t I2c_Isr_SlavePhaseEnd ( i2c_PeriphId_t periphId );
+
 i2c_RequestState_t I2c_Isr_Set_ItActive   ( i2c_PeriphId_t periphId, i2c_IsrItMask_t itMask );
 i2c_RequestState_t I2c_Isr_Set_ItInactive ( i2c_PeriphId_t periphId, i2c_IsrItMask_t itMask );
 
