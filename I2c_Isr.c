@@ -134,6 +134,33 @@ i2c_RequestState_t I2c_Isr_XferStop( i2c_PeriphId_t periphId )
 
 
 /**
+ * \brief Starts / stops listening of the slave in ISR mode - slave sequencing events and data
+ *        register events are enabled / all I2C interrupt sources are disabled
+ *
+ * \param periphId    [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
+ * \param listenState [in]: Listen started / stopped, value from \ref i2c_FunctionState_t
+ *
+ * \return Function processing state. Returns \ref I2C_REQUEST_OK if request
+ *         was processed without problems. Otherwise returns \ref I2C_REQUEST_ERROR.
+ */
+i2c_RequestState_t I2c_Isr_Listen( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState )
+{
+    i2c_RequestState_t retState = I2C_REQUEST_ERROR;
+
+    if( I2C_FUNCTION_ACTIVE == listenState )
+    {
+        retState = I2c_Isr_Set_ItActive( periphId, ( I2C_ISR_IT_SLAVE | I2C_ISR_IT_DATA ) );
+    }
+    else
+    {
+        retState = I2c_Isr_Set_ItInactive( periphId, I2C_ISR_IT_ALL );
+    }
+
+    return ( retState );
+}
+
+
+/**
  * \brief Enables I2C interrupt sources (I2C_CR1 enable bits)
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
@@ -227,7 +254,7 @@ i2c_RequestState_t I2c_Isr_Set_ItInactive( i2c_PeriphId_t periphId, i2c_IsrItMas
 
 /**
  * \brief I2C event / error interrupt processing - data byte is moved in ISR mode, sequencing
- *        events and errors are processed in ISR and DMA mode
+ *        events and errors are processed in ISR and DMA mode (slave: slave sequencing)
  *
  * \param periphId [in]: I2C peripheral identification, value from \ref i2c_PeriphId_t
  *
@@ -251,7 +278,14 @@ i2c_RequestState_t I2c_Isr_Handler( i2c_PeriphId_t periphId )
         /* Invalid peripheral identification */
     }
 
-    if( I2C_REQUEST_OK == retState )
+    if( ( I2C_REQUEST_OK == retState      ) &&
+        ( I2C_ROLE_SLAVE == xferCtx->Role )    )
+    {
+        const i2c_IsrFlags_t isrFlags = LL_I2C_ReadReg( periphReg, ISR );
+
+        retState = I2c_Set_SlaveEvents( periphId, isrFlags );
+    }
+    else if( I2C_REQUEST_OK == retState )
     {
         const i2c_IsrFlags_t isrFlags = LL_I2C_ReadReg( periphReg, ISR );
 

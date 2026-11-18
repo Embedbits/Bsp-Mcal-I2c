@@ -52,18 +52,33 @@ typedef struct
     volatile i2c_XferPhase_t      Phase;          /**< Running transfer phase                               */
     volatile i2c_FunctionState_t  XferState;      /**< Transfer is running (START - STOP)                   */
     volatile i2c_XferErrorId_t    XferError;      /**< Error of the running / last transfer                 */
+    i2c_Role_t                    Role;           /**< Role of the peripheral (set by I2c_Init)             */
+    i2c_Data_t                    FillByte;       /**< Slave: byte sent beyond TxSize                       */
+    i2c_SlaveAddr_t               OwnAddr;        /**< Slave: own address 1                                 */
+    i2c_AddrMode_t                OwnAddrMode;    /**< Slave: own address 1 is 7-bit or 10-bit              */
+    i2c_FunctionState_t           OwnAddr2State;  /**< Slave: own address 2 is answered while listening     */
+    i2c_FunctionState_t           GeneralCall;    /**< Slave: general call is answered while listening      */
+    volatile i2c_DataCnt_t        TxFillCnt;      /**< Slave: fill bytes written in the running read phase  */
+    volatile i2c_SlaveBuffer_t    SlaveBuffer;    /**< Slave: buffers of the application                    */
+    volatile i2c_FunctionState_t  ListenState;    /**< Slave: own addresses are answered                    */
+    volatile i2c_SlaveDir_t       SlaveDir;       /**< Slave: direction of the running phase                */
+    volatile i2c_SlaveResult_t    SlaveResult;    /**< Slave: result of the running transfer                */
+    i2c_SlaveResult_t             SlaveLast;      /**< Slave: result of the last finished transfer          */
 }   i2c_XferContext_t;
 
 
 /** \brief Data transfer mode handler interface (one per mode) */
 typedef struct
 {
-    i2c_RequestState_t ( *CheckConfig )( i2c_PeriphId_t periphId, const i2c_DataConfig_t * const dataConfig ); /**< Mode specific configuration check          */
-    i2c_RequestState_t ( *Init        )( i2c_PeriphId_t periphId );                                            /**< Mode resources initialization              */
-    i2c_RequestState_t ( *Deinit      )( i2c_PeriphId_t periphId );                                            /**< Mode resources deinitialization            */
-    i2c_RequestState_t ( *Start       )( i2c_PeriphId_t periphId );                                            /**< Transfer start (before START condition)    */
-    i2c_RequestState_t ( *Stop        )( i2c_PeriphId_t periphId );                                            /**< Transfer stop (resources released)         */
-    i2c_RequestState_t ( *CheckDone   )( i2c_PeriphId_t periphId );                                            /**< All data were moved at the end of transfer */
+    i2c_RequestState_t ( *CheckConfig   )( i2c_PeriphId_t periphId, const i2c_DataConfig_t * const dataConfig ); /**< Mode specific configuration check          */
+    i2c_RequestState_t ( *Init          )( i2c_PeriphId_t periphId );                                            /**< Mode resources initialization              */
+    i2c_RequestState_t ( *Deinit        )( i2c_PeriphId_t periphId );                                            /**< Mode resources deinitialization            */
+    i2c_RequestState_t ( *Start         )( i2c_PeriphId_t periphId );                                            /**< Transfer start (before START condition)    */
+    i2c_RequestState_t ( *Stop          )( i2c_PeriphId_t periphId );                                            /**< Transfer stop (resources released)         */
+    i2c_RequestState_t ( *CheckDone     )( i2c_PeriphId_t periphId );                                            /**< All data were moved at the end of transfer */
+    i2c_RequestState_t ( *Listen        )( i2c_PeriphId_t periphId, i2c_FunctionState_t listenState );           /**< Slave: listen started / stopped            */
+    i2c_RequestState_t ( *SlavePhase    )( i2c_PeriphId_t periphId );                                            /**< Slave: phase of SlaveDir starts            */
+    i2c_RequestState_t ( *SlavePhaseEnd )( i2c_PeriphId_t periphId );                                            /**< Slave: phase ends, counts are updated      */
 }   i2c_XferModeIf_t;
 
 /* ========================= SYMBOLIC CONSTANTS ============================= */
@@ -86,6 +101,8 @@ i2c_RequestState_t I2c_Get_XferContext    ( i2c_PeriphId_t periphId, i2c_XferCon
 i2c_RequestState_t I2c_Set_XferDataStep   ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
 i2c_RequestState_t I2c_Set_XferEvents     ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
 i2c_RequestState_t I2c_Set_XferError      ( i2c_PeriphId_t periphId, i2c_XferErrorId_t errorId );
+
+i2c_RequestState_t I2c_Set_SlaveEvents    ( i2c_PeriphId_t periphId, i2c_IsrFlags_t isrFlags );
 
 #ifdef __cplusplus
 }
